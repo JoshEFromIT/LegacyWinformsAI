@@ -360,30 +360,152 @@ input:focus {
     color: var(--text-muted);
 }
 
-/* --- Raw Mermaid --- */
-.raw-mermaid pre {
-    background: var(--bg-input);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    padding: 1rem;
-    overflow-x: auto;
-    font-size: 0.82rem;
-    line-height: 1.5;
-    color: var(--accent-green);
-    margin-bottom: 1rem;
+/* --- Live Mermaid Editor --- */
+.live-editor {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 280px);
+    min-height: 500px;
 }
 
-.raw-mermaid h3 {
-    font-size: 0.85rem;
+.editor-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.editor-diagram-select {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-input);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+}
+
+.editor-diagram-btn {
+    background: transparent;
     color: var(--text-secondary);
+    border: none;
+    border-radius: 3px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.editor-diagram-btn.active {
+    background: var(--accent-blue);
+    color: #fff;
+}
+
+.editor-diagram-btn:hover:not(.active) {
+    background: rgba(74,158,255,0.15);
+    color: var(--text-primary);
+}
+
+.editor-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.btn-reset {
+    background: rgba(239,83,80,0.15);
+    color: var(--accent-red);
+    border: 1px solid rgba(239,83,80,0.3);
+}
+
+.btn-reset:hover {
+    background: rgba(239,83,80,0.25);
+}
+
+.editor-split {
+    display: flex;
+    gap: 0.75rem;
+    flex: 1;
+    min-height: 0;
+}
+
+.editor-code-pane,
+.editor-preview-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.pane-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
     margin-bottom: 0.4rem;
 }
 
-.copy-controls {
+#editor-textarea {
+    flex: 1;
+    width: 100%;
+    resize: none;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.8rem;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: var(--accent-green);
+    tab-size: 4;
+    transition: border-color 0.2s;
+}
+
+#editor-textarea:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.editor-error {
+    font-size: 0.75rem;
+    color: var(--accent-red);
+    margin-top: 0.4rem;
+    min-height: 1.2em;
+    line-height: 1.4;
+}
+
+.editor-error:empty {
+    display: none;
+}
+
+.editor-preview-pane .mermaid-container {
+    flex: 1;
+    overflow: auto;
     display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-top: 0.5rem;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.editor-preview-pane .mermaid-container svg {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+@media (max-width: 768px) {
+    .editor-split {
+        flex-direction: column;
+    }
+
+    .editor-code-pane,
+    .editor-preview-pane {
+        min-height: 250px;
+    }
+
+    .live-editor {
+        height: auto;
+    }
+
+    .editor-toolbar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
 }
 
 /* --- Loading Overlay --- */
