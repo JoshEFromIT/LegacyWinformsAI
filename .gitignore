@@ -18,6 +18,8 @@ models/*.gguf
 
 # Node
 node_modules/
+package.json
+package-lock.json
 
 # IDE
 .vscode/
