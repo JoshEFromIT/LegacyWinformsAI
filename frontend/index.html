@@ -91,7 +91,7 @@
                 <button class="tab" data-tab="sequence">Sequence Diagram</button>
                 <button class="tab" data-tab="state">State Diagram</button>
                 <button class="tab" data-tab="narrative">Narrative</button>
-                <button class="tab" data-tab="raw">Raw Mermaid</button>
+                <button class="tab" data-tab="editor">Live Editor</button>
             </div>
 
             <div class="tab-content">
@@ -107,18 +107,32 @@
                 <div id="tab-narrative" class="tab-pane">
                     <div id="narrative-content" class="narrative"></div>
                 </div>
-                <div id="tab-raw" class="tab-pane">
-                    <div class="raw-mermaid">
-                        <h3>Flowchart</h3>
-                        <pre id="raw-flowchart"></pre>
-                        <h3>Sequence Diagram</h3>
-                        <pre id="raw-sequence"></pre>
-                        <h3>State Diagram</h3>
-                        <pre id="raw-state"></pre>
-                        <div class="copy-controls">
-                            <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('raw-flowchart')">Copy Flowchart</button>
-                            <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('raw-sequence')">Copy Sequence</button>
-                            <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('raw-state')">Copy State</button>
+                <div id="tab-editor" class="tab-pane">
+                    <div class="live-editor">
+                        <div class="editor-toolbar">
+                            <div class="editor-diagram-select">
+                                <button class="btn btn-sm editor-diagram-btn active" data-diagram="flowchart">Flowchart</button>
+                                <button class="btn btn-sm editor-diagram-btn" data-diagram="sequence">Sequence</button>
+                                <button class="btn btn-sm editor-diagram-btn" data-diagram="state">State</button>
+                            </div>
+                            <div class="editor-actions">
+                                <button class="btn btn-secondary btn-sm" onclick="editorCopyCode()" title="Copy Mermaid code">Copy Code</button>
+                                <button class="btn btn-secondary btn-sm" onclick="editorCopySvg()" title="Copy rendered SVG">Copy SVG</button>
+                                <button class="btn btn-secondary btn-sm" onclick="editorDownloadSvg()" title="Download as .svg file">Download SVG</button>
+                                <button class="btn btn-secondary btn-sm" onclick="editorDownloadPng()" title="Download as .png file">Download PNG</button>
+                                <button class="btn btn-sm btn-reset" onclick="editorResetCode()" title="Reset to original generated code">Reset</button>
+                            </div>
+                        </div>
+                        <div class="editor-split">
+                            <div class="editor-code-pane">
+                                <div class="pane-label">Mermaid Code</div>
+                                <textarea id="editor-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+                                <div id="editor-error" class="editor-error"></div>
+                            </div>
+                            <div class="editor-preview-pane">
+                                <div class="pane-label">Live Preview</div>
+                                <div id="editor-preview" class="mermaid-container"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
