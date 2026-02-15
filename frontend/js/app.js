@@ -3,6 +3,8 @@
  *
  * Manages session lifecycle, screenshot upload, and results display
  * with Mermaid diagram rendering.
+ *
+ * Uses local Ollama LLM for AI vision analysis (no cloud APIs required).
  */
 
 const API = '/api';
@@ -187,7 +189,7 @@ document.getElementById('btn-stop-rec').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-analyze').addEventListener('click', async () => {
-    showLoading('Analyzing screenshots with AI vision...');
+    showLoading('Analyzing screenshots with local AI (Ollama)... This may take a while depending on your hardware.');
     try {
         const resp = await fetch(`${API}/sessions/${activeSessionId}/analyze`, {
             method: 'POST',
@@ -381,5 +383,34 @@ function copyToClipboard(elementId) {
     });
 }
 
+// ============================================
+// Ollama Status Check
+// ============================================
+
+async function checkOllamaStatus() {
+    const statusEl = document.getElementById('ollama-status');
+    try {
+        const resp = await fetch(`${API}/health/ollama`);
+        const health = await resp.json();
+
+        if (health.ollama_reachable && health.model_ready) {
+            statusEl.innerHTML = `<span class="ollama-connected">Ollama connected — ${escapeHtml(health.configured_model)}</span>`;
+            statusEl.className = 'ollama-status connected';
+        } else if (health.ollama_reachable && !health.model_ready) {
+            statusEl.innerHTML = `<span class="ollama-warning">Ollama connected — model "${escapeHtml(health.configured_model)}" not found. Run: ollama pull ${escapeHtml(health.configured_model)}</span>`;
+            statusEl.className = 'ollama-status warning';
+        } else {
+            statusEl.innerHTML = `<span class="ollama-disconnected">Ollama not reachable at ${escapeHtml(health.ollama_url)}</span>`;
+            statusEl.className = 'ollama-status disconnected';
+        }
+    } catch (err) {
+        statusEl.innerHTML = '<span class="ollama-disconnected">Cannot check Ollama status</span>';
+        statusEl.className = 'ollama-status disconnected';
+    }
+}
+
 // --- Initial Load ---
 loadSessions();
+checkOllamaStatus();
+// Re-check Ollama status periodically
+setInterval(checkOllamaStatus, 30000);

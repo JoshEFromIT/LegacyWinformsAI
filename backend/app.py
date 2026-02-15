@@ -19,10 +19,11 @@ app = FastAPI(
     title="RDP Recorder & Diagram Generator",
     description=(
         "Records screen interactions from RDP sessions viewing .NET WinForms "
-        "applications with Infragistics controls, then uses AI vision to generate "
-        "Mermaid diagrams and narrative documentation."
+        "applications with Infragistics controls, then uses a local AI vision model "
+        "via Ollama (llama3.2-vision) to generate Mermaid diagrams and narrative "
+        "documentation. No cloud API keys required."
     ),
-    version="1.0.0",
+    version="2.0.0",
 )
 
 app.add_middleware(

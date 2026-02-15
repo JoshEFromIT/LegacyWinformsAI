@@ -1,7 +1,7 @@
 """AI-powered screenshot analysis service.
 
-Uses vision-capable LLMs (Claude or OpenAI GPT-4o) to analyze screenshots
-of .NET WinForms applications with Infragistics and custom controls.
+Uses a local vision-capable LLM via Ollama (llama3.2-vision by default) to analyze
+screenshots of .NET WinForms applications with Infragistics and custom controls.
 """
 
 from __future__ import annotations
@@ -68,14 +68,12 @@ Respond ONLY with valid JSON matching this structure:
 
 
 class AnalyzerService:
-    """Analyzes screenshots using vision-capable LLMs."""
+    """Analyzes screenshots using a local vision-capable LLM via Ollama."""
 
     def __init__(self) -> None:
-        self.provider = os.getenv("AI_PROVIDER", "anthropic").lower()
-        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        self.anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-        self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
-        self.openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.model = os.getenv("OLLAMA_MODEL", "llama3.2-vision")
+        self.timeout = int(os.getenv("OLLAMA_TIMEOUT", "300"))
 
     async def analyze_screenshot(
         self,
@@ -83,7 +81,7 @@ class AnalyzerService:
         capture_id: str,
         previous_analysis: Optional[ScreenAnalysis] = None,
     ) -> ScreenAnalysis:
-        """Analyze a single screenshot using the configured AI provider."""
+        """Analyze a single screenshot using the local Ollama vision model."""
         image_b64 = self._encode_image(image_path)
 
         context_msg = ""
@@ -98,13 +96,7 @@ class AnalyzerService:
 
         user_prompt = f"Analyze this screenshot of a .NET WinForms application.{context_msg}"
 
-        if self.provider == "anthropic":
-            raw = await self._call_anthropic(image_b64, user_prompt)
-        elif self.provider == "openai":
-            raw = await self._call_openai(image_b64, user_prompt)
-        else:
-            raise ValueError(f"Unknown AI provider: {self.provider}")
-
+        raw = await self._call_ollama(image_b64, user_prompt)
         return self._parse_response(raw, capture_id)
 
     async def analyze_batch(
@@ -134,74 +126,77 @@ class AnalyzerService:
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
-    async def _call_anthropic(self, image_b64: str, user_prompt: str) -> dict:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": self.anthropic_api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
+    async def _call_ollama(self, image_b64: str, user_prompt: str) -> dict:
+        """Call the local Ollama API with a vision model request."""
+        url = f"{self.ollama_base_url}/api/chat"
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": ANALYSIS_SYSTEM_PROMPT,
                 },
-                json={
-                    "model": self.anthropic_model,
-                    "max_tokens": 4096,
-                    "system": ANALYSIS_SYSTEM_PROMPT,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": "image/png",
-                                        "data": image_b64,
-                                    },
-                                },
-                                {"type": "text", "text": user_prompt},
-                            ],
-                        }
-                    ],
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                    "images": [image_b64],
                 },
-            )
+            ],
+            "stream": False,
+            "options": {
+                "num_predict": 4096,
+                "temperature": 0.1,
+            },
+            "format": "json",
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            text = data["content"][0]["text"]
+            text = data["message"]["content"]
             return self._extract_json(text)
 
-    async def _call_openai(self, image_b64: str, user_prompt: str) -> dict:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.openai_model,
-                    "max_tokens": 4096,
-                    "messages": [
-                        {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{image_b64}",
-                                    },
-                                },
-                                {"type": "text", "text": user_prompt},
-                            ],
-                        },
-                    ],
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            text = data["choices"][0]["message"]["content"]
-            return self._extract_json(text)
+    async def check_health(self) -> dict:
+        """Check if Ollama is reachable and the configured model is available."""
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                # Check Ollama is running
+                resp = await client.get(f"{self.ollama_base_url}/api/tags")
+                resp.raise_for_status()
+                data = resp.json()
+
+                available_models = [m["name"] for m in data.get("models", [])]
+                model_ready = any(
+                    self.model in name for name in available_models
+                )
+
+                return {
+                    "ollama_reachable": True,
+                    "ollama_url": self.ollama_base_url,
+                    "configured_model": self.model,
+                    "model_ready": model_ready,
+                    "available_models": available_models,
+                }
+        except httpx.ConnectError:
+            return {
+                "ollama_reachable": False,
+                "ollama_url": self.ollama_base_url,
+                "configured_model": self.model,
+                "model_ready": False,
+                "available_models": [],
+                "error": "Cannot connect to Ollama. Is it running?",
+            }
+        except Exception as e:
+            return {
+                "ollama_reachable": False,
+                "ollama_url": self.ollama_base_url,
+                "configured_model": self.model,
+                "model_ready": False,
+                "available_models": [],
+                "error": str(e),
+            }
 
     def _extract_json(self, text: str) -> dict:
         """Extract JSON from LLM response, handling markdown code blocks."""
@@ -213,7 +208,32 @@ class AnalyzerService:
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             text = "\n".join(lines)
-        return json.loads(text)
+
+        # Try direct parse first
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Try to find JSON object in the response
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start != -1 and end > start:
+            try:
+                return json.loads(text[start:end])
+            except json.JSONDecodeError:
+                pass
+
+        # Return a minimal fallback structure
+        logger.warning("Could not parse JSON from LLM response, using fallback")
+        return {
+            "window_title": "",
+            "detected_form": "",
+            "controls": [],
+            "actions_since_previous": [],
+            "narrative_fragment": text[:200] if text else "[No response from model]",
+            "raw_description": text,
+        }
 
     def _parse_response(self, raw: dict, capture_id: str) -> ScreenAnalysis:
         controls = []

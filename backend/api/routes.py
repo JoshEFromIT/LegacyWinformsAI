@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from backend.models.schemas import RDPConnectionConfig, RecordingSession, ScreenCapture
 from backend.services.session_manager import SessionManager
+from backend.services.analyzer import AnalyzerService
 
 router = APIRouter(prefix="/api")
 
@@ -167,3 +168,12 @@ async def get_capture_image(session_id: str, capture_id: str):
             raise HTTPException(status_code=404, detail="Image file not found")
 
     raise HTTPException(status_code=404, detail="Capture not found")
+
+
+# --- Ollama Health Check ---
+
+@router.get("/health/ollama")
+async def ollama_health():
+    """Check Ollama connectivity and model availability."""
+    analyzer = AnalyzerService()
+    return await analyzer.check_health()

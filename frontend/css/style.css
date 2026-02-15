@@ -417,6 +417,39 @@ input:focus {
     font-size: 0.9rem;
 }
 
+/* --- Ollama Status Indicator --- */
+.ollama-status {
+    margin-top: 0.5rem;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: var(--radius-sm);
+    display: inline-block;
+}
+
+.ollama-status.connected {
+    background: rgba(76,175,80,0.15);
+}
+
+.ollama-status.warning {
+    background: rgba(255,183,77,0.15);
+}
+
+.ollama-status.disconnected {
+    background: rgba(239,83,80,0.15);
+}
+
+.ollama-connected {
+    color: var(--accent-green);
+}
+
+.ollama-warning {
+    color: var(--accent-amber);
+}
+
+.ollama-disconnected {
+    color: var(--accent-red);
+}
+
 /* --- Footer --- */
 footer {
     text-align: center;
