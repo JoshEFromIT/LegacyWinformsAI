@@ -263,6 +263,15 @@ class DiagramGenerator:
             .replace(">", "›")
             .replace("&", "+")
             .replace("\n", " ")
+            .replace("#", "♯")
+            .replace(";", ",")
+            .replace("(", "❨")
+            .replace(")", "❩")
+            .replace("[", "❲")
+            .replace("]", "❳")
+            .replace("{", "❴")
+            .replace("}", "❵")
+            .replace("|", "¦")
         )
 
     @staticmethod

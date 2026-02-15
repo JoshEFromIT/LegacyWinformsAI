@@ -21,13 +21,19 @@ const loadingOverlay = document.getElementById('loading-overlay');
 const loadingText = document.getElementById('loading-text');
 
 // --- Initialize Mermaid ---
-mermaid.initialize({
-    startOnLoad: false,
-    theme: 'default',
-    securityLevel: 'loose',
-    flowchart: { useMaxWidth: true, htmlLabels: true },
-    sequence: { useMaxWidth: true },
-});
+let mermaidReady = false;
+try {
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: 'default',
+        securityLevel: 'loose',
+        flowchart: { useMaxWidth: true, htmlLabels: true },
+        sequence: { useMaxWidth: true },
+    });
+    mermaidReady = true;
+} catch (err) {
+    console.error('Mermaid failed to initialize:', err);
+}
 
 // ============================================
 // Session Management
@@ -189,7 +195,7 @@ document.getElementById('btn-stop-rec').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-analyze').addEventListener('click', async () => {
-    showLoading('Analyzing screenshots with local AI (Ollama)... This may take a while depending on your hardware.');
+    showLoading('Analyzing screenshots in parallel with local AI (Ollama)...');
     try {
         const resp = await fetch(`${API}/sessions/${activeSessionId}/analyze`, {
             method: 'POST',
@@ -201,6 +207,9 @@ document.getElementById('btn-analyze').addEventListener('click', async () => {
             showResults(session.result);
         } else if (session.status === 'error') {
             alert('Analysis failed: ' + (session.error_message || 'Unknown error'));
+        } else {
+            console.warn('Unexpected session state after analyze:', session);
+            alert('Analysis completed with unexpected status: ' + session.status);
         }
     } catch (err) {
         hideLoading();
@@ -326,6 +335,10 @@ async function showResults(result) {
 
 async function renderMermaidDiagram(containerId, code) {
     const container = document.getElementById(containerId);
+    if (!mermaidReady) {
+        container.innerHTML = '<pre style="color:#ef5350;">Mermaid library failed to load. Check browser console (F12) for errors.\nIf on a corporate network, mermaid.min.js may be blocked.</pre>';
+        return;
+    }
     if (!code) {
         container.innerHTML = '<p style="color:#999;">No diagram data available.</p>';
         return;
@@ -378,6 +391,11 @@ async function editorRenderPreview() {
     const code = document.getElementById('editor-textarea').value.trim();
     const preview = document.getElementById('editor-preview');
     const errorEl = document.getElementById('editor-error');
+
+    if (!mermaidReady) {
+        preview.innerHTML = '<p style="color:#ef5350;">Mermaid library not loaded.</p>';
+        return;
+    }
 
     if (!code) {
         preview.innerHTML = '<p style="color:#999;">Enter Mermaid code on the left to see a live preview.</p>';

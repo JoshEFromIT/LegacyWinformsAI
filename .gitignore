@@ -16,6 +16,9 @@ sessions/
 # GGUF model files (too large for git)
 models/*.gguf
 
+# Node
+node_modules/
+
 # IDE
 .vscode/
 .idea/

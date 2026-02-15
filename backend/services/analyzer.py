@@ -6,7 +6,9 @@ with Infragistics and custom controls. Supports loading custom GGUF model files.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import io
 import json
 import logging
 import os
@@ -14,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+from PIL import Image
 
 from backend.models.schemas import ScreenAnalysis, UIControl, UserAction
 
@@ -219,28 +222,46 @@ class AnalyzerService:
         self,
         captures: list[tuple[Path, str]],
     ) -> list[ScreenAnalysis]:
-        """Analyze a sequence of screenshots, threading context between frames."""
+        """Analyze screenshots in parallel for much faster throughput.
+
+        Uses a semaphore to limit concurrent Ollama requests (default 4).
+        """
         await self.ensure_gguf_model()
 
-        results: list[ScreenAnalysis] = []
-        prev: Optional[ScreenAnalysis] = None
+        concurrency = int(os.getenv("OLLAMA_CONCURRENCY", "4"))
+        sem = asyncio.Semaphore(concurrency)
 
-        for image_path, capture_id in captures:
-            try:
-                analysis = await self.analyze_screenshot(image_path, capture_id, prev)
-                results.append(analysis)
-                prev = analysis
-            except Exception:
-                logger.exception("Failed to analyze capture %s", capture_id)
-                results.append(ScreenAnalysis(
-                    capture_id=capture_id,
-                    narrative_fragment="[Analysis failed for this frame]",
-                ))
-                # Keep prev as-is so next frame still has context
+        async def _analyze_one(image_path: Path, capture_id: str) -> ScreenAnalysis:
+            async with sem:
+                try:
+                    return await self.analyze_screenshot(image_path, capture_id)
+                except Exception:
+                    logger.exception("Failed to analyze capture %s", capture_id)
+                    return ScreenAnalysis(
+                        capture_id=capture_id,
+                        narrative_fragment="[Analysis failed for this frame]",
+                    )
 
-        return results
+        tasks = [
+            _analyze_one(image_path, capture_id)
+            for image_path, capture_id in captures
+        ]
+        results = await asyncio.gather(*tasks)
+        return list(results)
 
     def _encode_image(self, path: Path) -> str:
+        """Encode image to base64, resizing large images for faster inference."""
+        max_dim = int(os.getenv("IMAGE_MAX_DIM", "1280"))
+        img = Image.open(path)
+
+        # Resize if either dimension exceeds max_dim
+        if img.width > max_dim or img.height > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.LANCZOS)
+            buf = io.BytesIO()
+            fmt = "PNG" if path.suffix.lower() == ".png" else "JPEG"
+            img.save(buf, format=fmt, quality=85)
+            return base64.b64encode(buf.getvalue()).decode("utf-8")
+
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
