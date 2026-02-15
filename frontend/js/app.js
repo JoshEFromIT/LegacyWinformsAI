@@ -293,35 +293,22 @@ async function uploadFiles(files) {
 // Results Display
 // ============================================
 
-// Store diagram code for the live editor (editable copies + originals for reset)
-let editorDiagramSources = { flowchart: '', sequence: '', state: '' };
-let editorOriginalSources = { flowchart: '', sequence: '', state: '' };
-let editorActiveDiagram = 'flowchart';
-let editorDebounceTimer = null;
-
 async function showResults(result) {
     recordingPanel.style.display = 'none';
     resultsPanel.style.display = 'block';
 
-    // Store original sources for the live editor
-    editorOriginalSources = {
-        flowchart: result.mermaid_flowchart || '',
-        sequence: result.mermaid_sequence || '',
-        state: result.mermaid_state || '',
-    };
-    editorDiagramSources = { ...editorOriginalSources };
+    // Raw mermaid text
+    document.getElementById('raw-flowchart').textContent = result.mermaid_flowchart || '';
+    document.getElementById('raw-sequence').textContent = result.mermaid_sequence || '';
+    document.getElementById('raw-state').textContent = result.mermaid_state || '';
 
     // Narrative (render markdown-like content)
     document.getElementById('narrative-content').innerHTML = renderNarrative(result.narrative || '');
 
-    // Render mermaid diagrams in read-only tabs
+    // Render mermaid diagrams
     await renderMermaidDiagram('mermaid-flowchart', result.mermaid_flowchart);
     await renderMermaidDiagram('mermaid-sequence', result.mermaid_sequence);
     await renderMermaidDiagram('mermaid-state', result.mermaid_state);
-
-    // Initialize the live editor with the flowchart
-    editorActiveDiagram = 'flowchart';
-    editorLoadDiagram('flowchart');
 }
 
 async function renderMermaidDiagram(containerId, code) {
@@ -355,156 +342,6 @@ function renderNarrative(text) {
         .replace(/$/, '</p>');
 }
 
-// ============================================
-// Live Mermaid Editor
-// ============================================
-
-function editorLoadDiagram(diagramType) {
-    editorActiveDiagram = diagramType;
-    const textarea = document.getElementById('editor-textarea');
-    textarea.value = editorDiagramSources[diagramType] || '';
-
-    // Update selector buttons
-    document.querySelectorAll('.editor-diagram-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.diagram === diagramType);
-    });
-
-    // Clear errors and render
-    document.getElementById('editor-error').textContent = '';
-    editorRenderPreview();
-}
-
-async function editorRenderPreview() {
-    const code = document.getElementById('editor-textarea').value.trim();
-    const preview = document.getElementById('editor-preview');
-    const errorEl = document.getElementById('editor-error');
-
-    if (!code) {
-        preview.innerHTML = '<p style="color:#999;">Enter Mermaid code on the left to see a live preview.</p>';
-        errorEl.textContent = '';
-        return;
-    }
-
-    try {
-        const id = `editor-preview-${Date.now()}`;
-        const { svg } = await mermaid.render(id, code);
-        preview.innerHTML = svg;
-        errorEl.textContent = '';
-    } catch (err) {
-        errorEl.textContent = err.message || 'Syntax error in Mermaid code';
-        // Keep the last successful render visible
-    }
-}
-
-// Debounced input handler for the editor textarea
-document.getElementById('editor-textarea').addEventListener('input', () => {
-    clearTimeout(editorDebounceTimer);
-    editorDebounceTimer = setTimeout(editorRenderPreview, 400);
-});
-
-// Support Tab key for indentation in the textarea
-document.getElementById('editor-textarea').addEventListener('keydown', (e) => {
-    if (e.key === 'Tab') {
-        e.preventDefault();
-        const ta = e.target;
-        const start = ta.selectionStart;
-        const end = ta.selectionEnd;
-        ta.value = ta.value.substring(0, start) + '    ' + ta.value.substring(end);
-        ta.selectionStart = ta.selectionEnd = start + 4;
-        // Trigger debounced render
-        clearTimeout(editorDebounceTimer);
-        editorDebounceTimer = setTimeout(editorRenderPreview, 400);
-    }
-});
-
-// Diagram selector buttons
-document.querySelectorAll('.editor-diagram-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        // Save current edits back to sources before switching
-        editorDiagramSources[editorActiveDiagram] = document.getElementById('editor-textarea').value;
-        editorLoadDiagram(btn.dataset.diagram);
-    });
-});
-
-function editorResetCode() {
-    // Re-fetch original result for the active diagram would need a stored original.
-    // We keep the original in editorDiagramSources, but edits overwrite it.
-    // So we store originals separately.
-    if (!editorOriginalSources[editorActiveDiagram]) return;
-    editorDiagramSources[editorActiveDiagram] = editorOriginalSources[editorActiveDiagram];
-    document.getElementById('editor-textarea').value = editorOriginalSources[editorActiveDiagram];
-    editorRenderPreview();
-}
-
-function editorCopyCode() {
-    const code = document.getElementById('editor-textarea').value;
-    navigator.clipboard.writeText(code).then(() => {
-        showEditorToast('Code copied');
-    });
-}
-
-function editorCopySvg() {
-    const svg = document.getElementById('editor-preview').innerHTML;
-    if (!svg || svg.includes('<p')) return;
-    navigator.clipboard.writeText(svg).then(() => {
-        showEditorToast('SVG copied');
-    });
-}
-
-function editorDownloadSvg() {
-    const svg = document.getElementById('editor-preview').innerHTML;
-    if (!svg || svg.includes('<p')) return;
-    const blob = new Blob([svg], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${editorActiveDiagram}-diagram.svg`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
-
-function editorDownloadPng() {
-    const svgEl = document.querySelector('#editor-preview svg');
-    if (!svgEl) return;
-
-    const svgData = new XMLSerializer().serializeToString(svgEl);
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-
-    img.onload = () => {
-        // Use 2x for crisp export
-        const scale = 2;
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        canvas.toBlob((blob) => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${editorActiveDiagram}-diagram.png`;
-            a.click();
-            URL.revokeObjectURL(url);
-        }, 'image/png');
-    };
-
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-}
-
-function showEditorToast(message) {
-    const errorEl = document.getElementById('editor-error');
-    const prev = errorEl.textContent;
-    errorEl.style.color = 'var(--accent-green)';
-    errorEl.textContent = message;
-    setTimeout(() => {
-        errorEl.textContent = prev;
-        errorEl.style.color = '';
-    }, 1500);
-}
-
 // --- Tabs ---
 document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -514,11 +351,6 @@ document.querySelectorAll('.tab').forEach(tab => {
         tab.classList.add('active');
         const pane = document.getElementById(`tab-${tab.dataset.tab}`);
         if (pane) pane.classList.add('active');
-
-        // When switching to editor tab, trigger a render (in case code was loaded while hidden)
-        if (tab.dataset.tab === 'editor') {
-            editorRenderPreview();
-        }
     });
 });
 
@@ -541,8 +373,14 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text);
+function copyToClipboard(elementId) {
+    const text = document.getElementById(elementId).textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        const original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = original; }, 1500);
+    });
 }
 
 // ============================================
