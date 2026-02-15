@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RDP Recorder - WinForms Diagram Generator</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>RDP Session Recorder</h1>
+            <p class="subtitle">.NET WinForms &amp; Infragistics Interaction Analyzer</p>
+        </div>
+    </header>
+
+    <main>
+        <!-- Session Management Panel -->
+        <section id="session-panel" class="panel">
+            <h2>Sessions</h2>
+            <div class="session-controls">
+                <div class="form-group">
+                    <label for="display-name">Session Name</label>
+                    <input type="text" id="display-name" placeholder="e.g. Customer Workflow Recording">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="rdp-host">RDP Host (optional)</label>
+                        <input type="text" id="rdp-host" placeholder="192.168.1.100">
+                    </div>
+                    <div class="form-group">
+                        <label for="rdp-port">Port</label>
+                        <input type="number" id="rdp-port" value="3389" min="1" max="65535">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="capture-interval">Capture Interval (seconds)</label>
+                    <input type="number" id="capture-interval" value="2" min="0.5" max="30" step="0.5">
+                </div>
+                <button id="btn-create-session" class="btn btn-primary">Create Session</button>
+            </div>
+
+            <div id="session-list" class="session-list">
+                <!-- Sessions populated dynamically -->
+            </div>
+        </section>
+
+        <!-- Active Session / Recording Panel -->
+        <section id="recording-panel" class="panel" style="display:none;">
+            <div class="panel-header">
+                <h2 id="active-session-title">Recording</h2>
+                <div class="session-status">
+                    <span id="status-badge" class="badge">idle</span>
+                    <span id="capture-count">0 captures</span>
+                </div>
+            </div>
+
+            <div class="recording-controls">
+                <button id="btn-start-rec" class="btn btn-success">Start Auto-Capture</button>
+                <button id="btn-stop-rec" class="btn btn-danger" disabled>Stop Capture</button>
+                <button id="btn-analyze" class="btn btn-primary">Analyze &amp; Generate</button>
+                <button id="btn-back" class="btn btn-secondary">Back to Sessions</button>
+            </div>
+
+            <!-- Manual Upload -->
+            <div class="upload-zone" id="upload-zone">
+                <div class="upload-content">
+                    <p>Drag &amp; drop screenshots here, or click to upload</p>
+                    <p class="upload-hint">Supports PNG, JPG — capture your RDP window manually</p>
+                    <input type="file" id="file-input" accept="image/*" multiple hidden>
+                </div>
+            </div>
+
+            <!-- Capture Filmstrip -->
+            <div id="filmstrip" class="filmstrip">
+                <!-- Thumbnails populated dynamically -->
+            </div>
+        </section>
+
+        <!-- Results Panel -->
+        <section id="results-panel" class="panel" style="display:none;">
+            <div class="panel-header">
+                <h2>Analysis Results</h2>
+                <button id="btn-back-from-results" class="btn btn-secondary">Back</button>
+            </div>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="flowchart">Flowchart</button>
+                <button class="tab" data-tab="sequence">Sequence Diagram</button>
+                <button class="tab" data-tab="state">State Diagram</button>
+                <button class="tab" data-tab="narrative">Narrative</button>
+                <button class="tab" data-tab="raw">Raw Mermaid</button>
+            </div>
+
+            <div class="tab-content">
+                <div id="tab-flowchart" class="tab-pane active">
+                    <div id="mermaid-flowchart" class="mermaid-container"></div>
+                </div>
+                <div id="tab-sequence" class="tab-pane">
+                    <div id="mermaid-sequence" class="mermaid-container"></div>
+                </div>
+                <div id="tab-state" class="tab-pane">
+                    <div id="mermaid-state" class="mermaid-container"></div>
+                </div>
+                <div id="tab-narrative" class="tab-pane">
+                    <div id="narrative-content" class="narrative"></div>
+                </div>
+                <div id="tab-raw" class="tab-pane">
+                    <div class="raw-mermaid">
+                        <h3>Flowchart</h3>
+                        <pre id="raw-flowchart"></pre>
+                        <h3>Sequence Diagram</h3>
+                        <pre id="raw-sequence"></pre>
+                        <h3>State Diagram</h3>
+                        <pre id="raw-state"></pre>
+                        <div class="copy-controls">
+                            <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('raw-flowchart')">Copy Flowchart</button>
+                            <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('raw-sequence')">Copy Sequence</button>
+                            <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('raw-state')">Copy State</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay" style="display:none;">
+            <div class="spinner"></div>
+            <p id="loading-text">Analyzing screenshots with AI...</p>
+        </div>
+    </main>
+
+    <footer>
+        <p>RDP Recorder &mdash; AI-powered documentation for legacy .NET WinForms applications</p>
+    </footer>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
