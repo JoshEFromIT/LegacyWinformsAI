@@ -1,7 +1,7 @@
 """AI-powered screenshot analysis service.
 
-Uses a local vision-capable LLM via Ollama (llama3.2-vision by default) to analyze
-screenshots of .NET WinForms applications with Infragistics and custom controls.
+Uses a local LLM via Ollama to analyze screenshots of .NET WinForms applications
+with Infragistics and custom controls. Supports loading custom GGUF model files.
 """
 
 from __future__ import annotations
@@ -66,14 +66,128 @@ Respond ONLY with valid JSON matching this structure:
 }
 """
 
+# Default directory where users drop .gguf files
+MODELS_DIR = Path(os.getenv("MODELS_DIR", "models"))
+
 
 class AnalyzerService:
-    """Analyzes screenshots using a local vision-capable LLM via Ollama."""
+    """Analyzes screenshots using a local LLM via Ollama.
+
+    Supports two modes:
+    1. Pre-pulled Ollama models (e.g. ``ollama pull llama3.2-vision``)
+    2. Custom GGUF files placed in the ``models/`` directory and registered
+       automatically with Ollama via its ``/api/create`` endpoint.
+    """
 
     def __init__(self) -> None:
         self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.model = os.getenv("OLLAMA_MODEL", "llama3.2-vision")
         self.timeout = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+
+        # GGUF configuration
+        self.gguf_path = os.getenv("OLLAMA_GGUF_PATH", "")
+        self.gguf_projector_path = os.getenv("OLLAMA_GGUF_PROJECTOR_PATH", "")
+        self.gguf_model_name = os.getenv("OLLAMA_GGUF_MODEL_NAME", "")
+
+        self._gguf_registered = False
+
+    async def ensure_gguf_model(self) -> None:
+        """If a GGUF path is configured, register it with Ollama as a custom model.
+
+        This creates an Ollama model from the .gguf file using the /api/create
+        endpoint.  The model is only created once per service lifetime (or when
+        explicitly re-registered via the API).
+        """
+        gguf_file = self._resolve_gguf_path()
+        if not gguf_file:
+            return
+
+        if self._gguf_registered:
+            return
+
+        model_name = self.gguf_model_name or gguf_file.stem.lower().replace(" ", "-")
+
+        # Build the Modelfile content
+        modelfile_lines = [f"FROM {gguf_file}"]
+
+        # If a vision projector GGUF is provided, add it as an adapter
+        projector = self._resolve_projector_path()
+        if projector:
+            modelfile_lines.append(f"ADAPTER {projector}")
+
+        modelfile_lines.extend([
+            f'SYSTEM """{ANALYSIS_SYSTEM_PROMPT}"""',
+            "PARAMETER temperature 0.1",
+            "PARAMETER num_predict 4096",
+        ])
+
+        modelfile_content = "\n".join(modelfile_lines)
+
+        logger.info(
+            "Registering GGUF model with Ollama: name=%s, gguf=%s",
+            model_name, gguf_file,
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.ollama_base_url}/api/create",
+                    json={
+                        "model": model_name,
+                        "modelfile": modelfile_content,
+                        "stream": False,
+                    },
+                )
+                resp.raise_for_status()
+                logger.info("GGUF model '%s' registered successfully with Ollama", model_name)
+                self.model = model_name
+                self._gguf_registered = True
+        except Exception:
+            logger.exception("Failed to register GGUF model '%s' with Ollama", model_name)
+            raise
+
+    def _resolve_gguf_path(self) -> Optional[Path]:
+        """Resolve the GGUF file path from env var or auto-detect from models/ dir."""
+        # Explicit path from env
+        if self.gguf_path:
+            p = Path(self.gguf_path)
+            if p.exists():
+                return p
+            logger.warning("OLLAMA_GGUF_PATH set to '%s' but file not found", p)
+            return None
+
+        # Auto-detect: look for a single .gguf in the models directory
+        if MODELS_DIR.exists():
+            gguf_files = sorted(MODELS_DIR.glob("*.gguf"))
+            if len(gguf_files) == 1:
+                logger.info("Auto-detected GGUF model: %s", gguf_files[0])
+                return gguf_files[0]
+            elif len(gguf_files) > 1:
+                logger.warning(
+                    "Multiple .gguf files found in %s — set OLLAMA_GGUF_PATH to choose one: %s",
+                    MODELS_DIR,
+                    [f.name for f in gguf_files],
+                )
+
+        return None
+
+    def _resolve_projector_path(self) -> Optional[Path]:
+        """Resolve the vision projector GGUF path."""
+        if self.gguf_projector_path:
+            p = Path(self.gguf_projector_path)
+            if p.exists():
+                return p
+            logger.warning("OLLAMA_GGUF_PROJECTOR_PATH set to '%s' but file not found", p)
+
+        # Auto-detect: look for mmproj/projector gguf in models dir
+        if MODELS_DIR.exists():
+            for pattern in ["*mmproj*.gguf", "*projector*.gguf"]:
+                matches = sorted(MODELS_DIR.glob(pattern))
+                if matches:
+                    logger.info("Auto-detected vision projector: %s", matches[0])
+                    return matches[0]
+
+        return None
 
     async def analyze_screenshot(
         self,
@@ -81,7 +195,9 @@ class AnalyzerService:
         capture_id: str,
         previous_analysis: Optional[ScreenAnalysis] = None,
     ) -> ScreenAnalysis:
-        """Analyze a single screenshot using the local Ollama vision model."""
+        """Analyze a single screenshot using the local Ollama model."""
+        await self.ensure_gguf_model()
+
         image_b64 = self._encode_image(image_path)
 
         context_msg = ""
@@ -104,6 +220,8 @@ class AnalyzerService:
         captures: list[tuple[Path, str]],
     ) -> list[ScreenAnalysis]:
         """Analyze a sequence of screenshots, threading context between frames."""
+        await self.ensure_gguf_model()
+
         results: list[ScreenAnalysis] = []
         prev: Optional[ScreenAnalysis] = None
 
@@ -127,8 +245,19 @@ class AnalyzerService:
             return base64.b64encode(f.read()).decode("utf-8")
 
     async def _call_ollama(self, image_b64: str, user_prompt: str) -> dict:
-        """Call the local Ollama API with a vision model request."""
+        """Call the local Ollama API with a model request.
+
+        Sends the image for vision-capable models.  For text-only models the
+        image is omitted and the prompt includes a note that image analysis is
+        unavailable.
+        """
         url = f"{self.ollama_base_url}/api/chat"
+
+        user_message: dict = {
+            "role": "user",
+            "content": user_prompt,
+            "images": [image_b64],
+        }
 
         payload = {
             "model": self.model,
@@ -137,11 +266,7 @@ class AnalyzerService:
                     "role": "system",
                     "content": ANALYSIS_SYSTEM_PROMPT,
                 },
-                {
-                    "role": "user",
-                    "content": user_prompt,
-                    "images": [image_b64],
-                },
+                user_message,
             ],
             "stream": False,
             "options": {
@@ -159,10 +284,25 @@ class AnalyzerService:
             return self._extract_json(text)
 
     async def check_health(self) -> dict:
-        """Check if Ollama is reachable and the configured model is available."""
+        """Check if Ollama is reachable, the model is available, and GGUF status."""
+        gguf_file = self._resolve_gguf_path()
+        projector_file = self._resolve_projector_path()
+
+        gguf_info = {
+            "gguf_configured": bool(gguf_file),
+            "gguf_path": str(gguf_file) if gguf_file else None,
+            "gguf_projector_path": str(projector_file) if projector_file else None,
+            "gguf_registered": self._gguf_registered,
+        }
+
+        # Scan models/ dir for available GGUF files
+        available_gguf: list[str] = []
+        if MODELS_DIR.exists():
+            available_gguf = [f.name for f in sorted(MODELS_DIR.glob("*.gguf"))]
+        gguf_info["available_gguf_files"] = available_gguf
+
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                # Check Ollama is running
                 resp = await client.get(f"{self.ollama_base_url}/api/tags")
                 resp.raise_for_status()
                 data = resp.json()
@@ -178,6 +318,7 @@ class AnalyzerService:
                     "configured_model": self.model,
                     "model_ready": model_ready,
                     "available_models": available_models,
+                    **gguf_info,
                 }
         except httpx.ConnectError:
             return {
@@ -187,6 +328,7 @@ class AnalyzerService:
                 "model_ready": False,
                 "available_models": [],
                 "error": "Cannot connect to Ollama. Is it running?",
+                **gguf_info,
             }
         except Exception as e:
             return {
@@ -196,6 +338,7 @@ class AnalyzerService:
                 "model_ready": False,
                 "available_models": [],
                 "error": str(e),
+                **gguf_info,
             }
 
     def _extract_json(self, text: str) -> dict:
@@ -203,7 +346,6 @@ class AnalyzerService:
         text = text.strip()
         if text.startswith("```"):
             lines = text.split("\n")
-            # Remove first and last lines (``` markers)
             lines = lines[1:]
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]

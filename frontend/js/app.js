@@ -393,18 +393,55 @@ async function checkOllamaStatus() {
         const resp = await fetch(`${API}/health/ollama`);
         const health = await resp.json();
 
+        // Build GGUF info note if applicable
+        let ggufNote = '';
+        if (health.gguf_configured && health.gguf_registered) {
+            ggufNote = ' (GGUF loaded)';
+        } else if (health.gguf_configured && !health.gguf_registered) {
+            ggufNote = ' (GGUF detected, pending registration)';
+        } else if (health.available_gguf_files && health.available_gguf_files.length > 0) {
+            ggufNote = ` (${health.available_gguf_files.length} .gguf file${health.available_gguf_files.length > 1 ? 's' : ''} in models/)`;
+        }
+
         if (health.ollama_reachable && health.model_ready) {
-            statusEl.innerHTML = `<span class="ollama-connected">Ollama connected — ${escapeHtml(health.configured_model)}</span>`;
+            statusEl.innerHTML = `<span class="ollama-connected">Ollama connected — ${escapeHtml(health.configured_model)}${ggufNote}</span>`;
             statusEl.className = 'ollama-status connected';
         } else if (health.ollama_reachable && !health.model_ready) {
-            statusEl.innerHTML = `<span class="ollama-warning">Ollama connected — model "${escapeHtml(health.configured_model)}" not found. Run: ollama pull ${escapeHtml(health.configured_model)}</span>`;
+            let hint = `model "${escapeHtml(health.configured_model)}" not found.`;
+            if (health.gguf_configured) {
+                hint += ` <a href="#" onclick="registerGgufModel(); return false;" style="color:var(--accent-blue);">Click to register GGUF</a>`;
+            } else {
+                hint += ` Run: ollama pull ${escapeHtml(health.configured_model)}`;
+            }
+            statusEl.innerHTML = `<span class="ollama-warning">Ollama connected — ${hint}${ggufNote}</span>`;
             statusEl.className = 'ollama-status warning';
         } else {
-            statusEl.innerHTML = `<span class="ollama-disconnected">Ollama not reachable at ${escapeHtml(health.ollama_url)}</span>`;
+            statusEl.innerHTML = `<span class="ollama-disconnected">Ollama not reachable at ${escapeHtml(health.ollama_url)}${ggufNote}</span>`;
             statusEl.className = 'ollama-status disconnected';
         }
     } catch (err) {
         statusEl.innerHTML = '<span class="ollama-disconnected">Cannot check Ollama status</span>';
+        statusEl.className = 'ollama-status disconnected';
+    }
+}
+
+async function registerGgufModel() {
+    const statusEl = document.getElementById('ollama-status');
+    statusEl.innerHTML = '<span class="ollama-warning">Registering GGUF model with Ollama...</span>';
+    statusEl.className = 'ollama-status warning';
+    try {
+        const resp = await fetch(`${API}/models/register-gguf`, { method: 'POST' });
+        const result = await resp.json();
+        if (resp.ok) {
+            statusEl.innerHTML = `<span class="ollama-connected">GGUF registered as "${escapeHtml(result.model_name)}"</span>`;
+            statusEl.className = 'ollama-status connected';
+            setTimeout(checkOllamaStatus, 2000);
+        } else {
+            statusEl.innerHTML = `<span class="ollama-disconnected">Registration failed: ${escapeHtml(result.detail || 'Unknown error')}</span>`;
+            statusEl.className = 'ollama-status disconnected';
+        }
+    } catch (err) {
+        statusEl.innerHTML = `<span class="ollama-disconnected">Registration error: ${escapeHtml(err.message)}</span>`;
         statusEl.className = 'ollama-status disconnected';
     }
 }

@@ -13,6 +13,9 @@ venv/
 # Sessions data (screenshots)
 sessions/
 
+# GGUF model files (too large for git)
+models/*.gguf
+
 # IDE
 .vscode/
 .idea/

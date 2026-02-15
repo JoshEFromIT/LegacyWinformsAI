@@ -174,6 +174,36 @@ async def get_capture_image(session_id: str, capture_id: str):
 
 @router.get("/health/ollama")
 async def ollama_health():
-    """Check Ollama connectivity and model availability."""
+    """Check Ollama connectivity, model availability, and GGUF status."""
     analyzer = AnalyzerService()
     return await analyzer.check_health()
+
+
+# --- GGUF Model Management ---
+
+@router.post("/models/register-gguf")
+async def register_gguf_model():
+    """Register a GGUF model file with Ollama.
+
+    Detects .gguf files in the models/ directory (or from OLLAMA_GGUF_PATH)
+    and creates an Ollama model from the Modelfile.
+    """
+    analyzer = AnalyzerService()
+    analyzer._gguf_registered = False  # Force re-registration
+    try:
+        await analyzer.ensure_gguf_model()
+        if analyzer._gguf_registered:
+            return {
+                "status": "registered",
+                "model_name": analyzer.model,
+                "message": f"GGUF model registered as '{analyzer.model}' in Ollama",
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="No .gguf file found. Place a .gguf file in the models/ directory or set OLLAMA_GGUF_PATH.",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to register GGUF model: {e}")

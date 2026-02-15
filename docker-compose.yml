@@ -11,6 +11,7 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
     volumes:
       - ./sessions:/app/sessions
+      - ./models:/app/models
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -24,6 +25,7 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+      - ./models:/models
     restart: unless-stopped
     # GPU support (uncomment for NVIDIA GPU acceleration):
     # deploy:
