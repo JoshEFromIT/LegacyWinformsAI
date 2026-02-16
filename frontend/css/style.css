@@ -232,6 +232,33 @@ input:focus {
     color: var(--text-secondary);
 }
 
+/* --- Capture Status Banner --- */
+.capture-status {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 1rem;
+    background: rgba(239,83,80,0.12);
+    border: 1px solid rgba(239,83,80,0.3);
+    border-radius: var(--radius-sm);
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    color: var(--accent-red);
+}
+
+.capture-status-dot {
+    width: 10px;
+    height: 10px;
+    background: var(--accent-red);
+    border-radius: 50%;
+    animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
 /* --- Upload Zone --- */
 .upload-zone {
     border: 2px dashed var(--border-color);

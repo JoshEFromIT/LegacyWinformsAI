@@ -11,7 +11,6 @@ const API = '/api';
 
 // --- State ---
 let activeSessionId = null;
-let pollInterval = null;
 
 // --- DOM References ---
 const sessionPanel = document.getElementById('session-panel');
@@ -130,9 +129,10 @@ async function refreshSessionState() {
         document.getElementById('capture-count').textContent =
             `${session.captures?.length || 0} captures`;
 
-        const isRecording = session.status === 'recording';
-        document.getElementById('btn-start-rec').disabled = isRecording;
-        document.getElementById('btn-stop-rec').disabled = !isRecording;
+        // Button state is driven by browser screen capture, not server status
+        const isCapturing = screenStream !== null;
+        document.getElementById('btn-start-rec').disabled = isCapturing;
+        document.getElementById('btn-stop-rec').disabled = !isCapturing;
 
         renderFilmstrip(session);
 
@@ -171,28 +171,124 @@ async function deleteSession(sessionId) {
 }
 
 // ============================================
-// Recording Controls
+// Browser-Based Screen Capture (getDisplayMedia)
 // ============================================
 
+let screenStream = null;       // MediaStream from getDisplayMedia
+let captureTimer = null;       // setInterval ID for periodic frame grabs
+let captureFrameCount = 0;
+
 document.getElementById('btn-start-rec').addEventListener('click', async () => {
+    if (!activeSessionId) return;
+
     try {
-        await fetch(`${API}/sessions/${activeSessionId}/start`, { method: 'POST' });
-        startPolling();
-        refreshSessionState();
+        // Prompt user to pick a screen/window/tab to share
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { cursor: 'always' },
+            audio: false,
+        });
     } catch (err) {
-        alert('Failed to start recording: ' + err.message);
+        // User cancelled the picker or browser doesn't support it
+        if (err.name === 'NotAllowedError') {
+            alert('Screen sharing was cancelled. Click "Start Screen Capture" and select your RDP window or screen.');
+        } else {
+            alert('Screen capture not supported in this browser: ' + err.message);
+        }
+        return;
     }
+
+    // Wire up the video element so we can grab frames from it
+    const video = document.getElementById('screen-video');
+    video.srcObject = screenStream;
+    await video.play();
+
+    // When user clicks "Stop sharing" in the browser chrome bar
+    screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+        stopScreenCapture();
+    });
+
+    // Read the capture interval from the session config
+    const intervalInput = document.getElementById('capture-interval');
+    const interval = (parseFloat(intervalInput.value) || 2) * 1000;
+
+    captureFrameCount = 0;
+    showCaptureStatus('Capturing screen...');
+
+    // Update button states
+    document.getElementById('btn-start-rec').disabled = true;
+    document.getElementById('btn-stop-rec').disabled = false;
+
+    // Periodic frame grabber: snapshot the video to canvas, upload as PNG
+    captureTimer = setInterval(() => grabAndUploadFrame(video), interval);
+
+    // Grab the first frame immediately
+    grabAndUploadFrame(video);
 });
 
-document.getElementById('btn-stop-rec').addEventListener('click', async () => {
+document.getElementById('btn-stop-rec').addEventListener('click', () => {
+    stopScreenCapture();
+});
+
+async function grabAndUploadFrame(video) {
+    if (!activeSessionId || !video.videoWidth) return;
+
     try {
-        await fetch(`${API}/sessions/${activeSessionId}/stop`, { method: 'POST' });
-        stopPolling();
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0);
+
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        const formData = new FormData();
+        formData.append('file', blob, `capture_${Date.now()}.png`);
+
+        await fetch(`${API}/sessions/${activeSessionId}/frames`, {
+            method: 'POST',
+            body: formData,
+        });
+
+        captureFrameCount++;
+        showCaptureStatus(`Capturing screen... (${captureFrameCount} frames)`);
         refreshSessionState();
     } catch (err) {
-        alert('Failed to stop recording: ' + err.message);
+        console.error('Frame capture/upload failed:', err);
     }
-});
+}
+
+function stopScreenCapture() {
+    // Stop the interval timer
+    if (captureTimer) {
+        clearInterval(captureTimer);
+        captureTimer = null;
+    }
+
+    // Stop all media tracks (releases the screen share)
+    if (screenStream) {
+        screenStream.getTracks().forEach(t => t.stop());
+        screenStream = null;
+    }
+
+    // Clear the video element
+    const video = document.getElementById('screen-video');
+    video.srcObject = null;
+
+    // Update UI
+    document.getElementById('btn-start-rec').disabled = false;
+    document.getElementById('btn-stop-rec').disabled = true;
+    hideCaptureStatus();
+    refreshSessionState();
+}
+
+function showCaptureStatus(text) {
+    const el = document.getElementById('capture-status');
+    el.style.display = 'flex';
+    document.getElementById('capture-status-text').textContent = text;
+}
+
+function hideCaptureStatus() {
+    document.getElementById('capture-status').style.display = 'none';
+}
 
 document.getElementById('btn-analyze').addEventListener('click', () => {
     showLoading('Connecting to local AI (Ollama)...');
@@ -238,7 +334,7 @@ document.getElementById('btn-analyze').addEventListener('click', () => {
 });
 
 document.getElementById('btn-back').addEventListener('click', () => {
-    stopPolling();
+    stopScreenCapture();
     activeSessionId = null;
     recordingPanel.style.display = 'none';
     sessionPanel.style.display = 'block';
@@ -250,17 +346,6 @@ document.getElementById('btn-back-from-results').addEventListener('click', () =>
     recordingPanel.style.display = 'block';
 });
 
-function startPolling() {
-    stopPolling();
-    pollInterval = setInterval(refreshSessionState, 3000);
-}
-
-function stopPolling() {
-    if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-    }
-}
 
 // ============================================
 // File Upload (Drag & Drop + Click)

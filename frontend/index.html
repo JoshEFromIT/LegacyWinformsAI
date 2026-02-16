@@ -58,17 +58,26 @@
             </div>
 
             <div class="recording-controls">
-                <button id="btn-start-rec" class="btn btn-success">Start Auto-Capture</button>
+                <button id="btn-start-rec" class="btn btn-success">Start Screen Capture</button>
                 <button id="btn-stop-rec" class="btn btn-danger" disabled>Stop Capture</button>
                 <button id="btn-analyze" class="btn btn-primary">Analyze &amp; Generate</button>
                 <button id="btn-back" class="btn btn-secondary">Back to Sessions</button>
             </div>
 
+            <!-- Capture status banner -->
+            <div id="capture-status" class="capture-status" style="display:none;">
+                <div class="capture-status-dot"></div>
+                <span id="capture-status-text">Capturing...</span>
+            </div>
+
+            <!-- Screen capture preview (hidden video element + visible preview) -->
+            <video id="screen-video" autoplay muted style="display:none;"></video>
+
             <!-- Manual Upload -->
             <div class="upload-zone" id="upload-zone">
                 <div class="upload-content">
                     <p>Drag &amp; drop screenshots here, or click to upload</p>
-                    <p class="upload-hint">Supports PNG, JPG — capture your RDP window manually</p>
+                    <p class="upload-hint">Or use "Start Screen Capture" to auto-capture from your screen / RDP window</p>
                     <input type="file" id="file-input" accept="image/*" multiple hidden>
                 </div>
             </div>
