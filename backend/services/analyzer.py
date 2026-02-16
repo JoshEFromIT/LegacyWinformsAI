@@ -2,16 +2,22 @@
 
 Uses a local LLM via Ollama to analyze screenshots of .NET WinForms applications
 with Infragistics and custom controls. Supports loading custom GGUF model files.
+
+Optimized for rapid user interactions: deduplicates near-identical frames,
+keeps the model loaded between requests, and uses a prompt tuned for fast
+screen transitions with small UI elements.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -23,15 +29,27 @@ from backend.models.schemas import ScreenAnalysis, UIControl, UserAction
 logger = logging.getLogger(__name__)
 
 ANALYSIS_SYSTEM_PROMPT = """\
-You are analyzing screenshots of a legacy .NET WinForms application. Extract:
-- window_title: window title bar text
-- detected_form: logical form/screen name (e.g., "Customer Search")
-- controls: array of visible UI controls with control_type, label, state, is_infragistics, is_custom
-- actions_since_previous: array of user actions (type, description, target_control) compared to previous state
-- narrative_fragment: 1-2 sentence description of what user is doing
-- raw_description: detailed description of everything visible
+You are analyzing screenshots of a legacy .NET WinForms desktop application. \
+The user may be moving quickly between screens. Pay close attention to:
+- Title bar text and menu bar items (even if small)
+- Infragistics controls: UltraGrid, UltraTextEditor, UltraComboEditor, \
+UltraToolbarsManager, UltraDockManager, UltraTree, UltraTabControl, etc.
+- Toolbar buttons, status bar text, and any popup dialogs or tooltips
+- Data grid contents, column headers, and cell values when visible
+- Any custom or third-party controls that are not standard WinForms
 
-Output ONLY valid JSON (no markdown, no explanation).
+If you can see text, read it exactly — do not guess. If text is too small \
+to read, note that explicitly.
+
+Output ONLY valid JSON:
+{
+  "window_title": "exact title bar text",
+  "detected_form": "logical form name",
+  "controls": [{"control_type":"","label":"","state":"","is_infragistics":false,"is_custom":false}],
+  "actions_since_previous": [{"action_type":"","description":"","confidence":0.0,"target_control":null}],
+  "narrative_fragment": "1-2 sentence description",
+  "raw_description": "detailed description of everything visible"
+}
 """
 
 # Default directory where users drop .gguf files
@@ -49,8 +67,15 @@ class AnalyzerService:
 
     def __init__(self) -> None:
         self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.model = os.getenv("OLLAMA_MODEL", "llama3.2-vision")
+        self.model = os.getenv("OLLAMA_MODEL", "qwen2.5vl:7b")
         self.timeout = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+
+        # Keep model loaded between requests (default 10 min)
+        self.keep_alive = os.getenv("OLLAMA_KEEP_ALIVE", "10m")
+
+        # Frame deduplication threshold (0-64; lower = stricter)
+        # A value of 5 catches truly identical or near-identical frames.
+        self.dedup_threshold = int(os.getenv("DEDUP_THRESHOLD", "5"))
 
         # GGUF configuration
         self.gguf_path = os.getenv("OLLAMA_GGUF_PATH", "")
@@ -83,7 +108,7 @@ class AnalyzerService:
         if projector:
             modelfile_lines.append(f"ADAPTER {projector}")
 
-        max_tokens = int(os.getenv("OLLAMA_MAX_TOKENS", "1024"))
+        max_tokens = int(os.getenv("OLLAMA_MAX_TOKENS", "2048"))
         modelfile_lines.extend([
             f'SYSTEM """{ANALYSIS_SYSTEM_PROMPT}"""',
             "PARAMETER temperature 0.1",
@@ -196,21 +221,35 @@ class AnalyzerService:
         on_progress: Optional[object] = None,
         on_thinking: Optional[object] = None,
     ) -> list[ScreenAnalysis]:
-        """Analyze screenshots in parallel for much faster throughput.
+        """Analyze screenshots, skipping near-identical frames.
 
-        Uses a semaphore to limit concurrent Ollama requests (default 4).
-        Calls ``on_progress(completed, total, capture_id, narrative, analysis)``
-        after each screenshot finishes — the full ``ScreenAnalysis`` result is
-        included so callers can build live play-by-play and diagrams.
-        Calls ``on_thinking(capture_id, partial_text, is_complete)`` as the
-        model streams tokens for each screenshot.
+        Before sending anything to the LLM the frame list is deduplicated
+        using perceptual hashing so only frames with real visual changes are
+        analyzed.  Skipped frames receive a synthetic ``ScreenAnalysis`` that
+        copies the previous result (since they look the same).
+
+        Uses a semaphore to limit concurrent Ollama requests (default 3).
         """
         await self.ensure_gguf_model()
 
-        concurrency = int(os.getenv("OLLAMA_CONCURRENCY", "4"))
+        # --- Deduplicate ---
+        unique_captures, skipped_ids = self.deduplicate_frames(captures)
+        skipped_set = set(skipped_ids)
+
+        concurrency = int(os.getenv("OLLAMA_CONCURRENCY", "3"))
         sem = asyncio.Semaphore(concurrency)
         completed_count = 0
-        total = len(captures)
+        total_unique = len(unique_captures)
+
+        # Report skipped frames immediately so the UI shows progress
+        if on_progress and skipped_ids:
+            for sid in skipped_ids:
+                skipped_result = ScreenAnalysis(
+                    capture_id=sid,
+                    narrative_fragment="[Skipped — identical to previous frame]",
+                )
+                await on_progress(0, total_unique, sid,
+                                  skipped_result.narrative_fragment, skipped_result)
 
         async def _analyze_one(image_path: Path, capture_id: str) -> ScreenAnalysis:
             nonlocal completed_count
@@ -228,7 +267,7 @@ class AnalyzerService:
                 completed_count += 1
                 if on_progress:
                     await on_progress(
-                        completed_count, total, capture_id,
+                        completed_count, total_unique, capture_id,
                         result.narrative_fragment or "",
                         result,
                     )
@@ -236,14 +275,107 @@ class AnalyzerService:
 
         tasks = [
             _analyze_one(image_path, capture_id)
-            for image_path, capture_id in captures
+            for image_path, capture_id in unique_captures
         ]
-        results = await asyncio.gather(*tasks)
-        return list(results)
+        analyzed = await asyncio.gather(*tasks)
+
+        # Rebuild the full result list in original order, inserting
+        # placeholder results for skipped frames.
+        analyzed_map = {r.capture_id: r for r in analyzed}
+        results: list[ScreenAnalysis] = []
+        last_result: Optional[ScreenAnalysis] = None
+
+        for _path, cid in captures:
+            if cid in analyzed_map:
+                last_result = analyzed_map[cid]
+                results.append(last_result)
+            elif cid in skipped_set:
+                # Copy the previous result's form/window but mark as skipped
+                if last_result:
+                    results.append(ScreenAnalysis(
+                        capture_id=cid,
+                        window_title=last_result.window_title,
+                        detected_form=last_result.detected_form,
+                        controls=last_result.controls,
+                        narrative_fragment="[Same as previous frame — no change detected]",
+                        raw_description=last_result.raw_description,
+                    ))
+                else:
+                    results.append(ScreenAnalysis(
+                        capture_id=cid,
+                        narrative_fragment="[Skipped — identical to previous frame]",
+                    ))
+            else:
+                results.append(ScreenAnalysis(
+                    capture_id=cid,
+                    narrative_fragment="[Frame not analyzed]",
+                ))
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Frame deduplication
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _image_hash(path: Path, hash_size: int = 8) -> int:
+        """Compute a perceptual average-hash for an image.
+
+        Returns a 64-bit integer.  Two images with a hamming distance
+        <= threshold are considered near-identical.
+        """
+        img = Image.open(path).convert("L").resize(
+            (hash_size, hash_size), Image.LANCZOS
+        )
+        pixels = list(img.getdata())
+        avg = sum(pixels) / len(pixels)
+        return sum(1 << i for i, px in enumerate(pixels) if px >= avg)
+
+    @staticmethod
+    def _hamming(a: int, b: int) -> int:
+        return bin(a ^ b).count("1")
+
+    def deduplicate_frames(
+        self, captures: list[tuple[Path, str]],
+    ) -> tuple[list[tuple[Path, str]], list[str]]:
+        """Remove near-identical consecutive frames.
+
+        Returns ``(unique_captures, skipped_ids)``.
+        """
+        if not captures or self.dedup_threshold < 0:
+            return captures, []
+
+        unique: list[tuple[Path, str]] = [captures[0]]
+        skipped: list[str] = []
+        prev_hash = self._image_hash(captures[0][0])
+
+        for path, cid in captures[1:]:
+            h = self._image_hash(path)
+            if self._hamming(prev_hash, h) <= self.dedup_threshold:
+                skipped.append(cid)
+                logger.info("Dedup: skipping %s (identical to previous)", cid)
+            else:
+                unique.append((path, cid))
+                prev_hash = h
+
+        if skipped:
+            logger.info(
+                "Dedup: %d/%d frames are unique (%d skipped)",
+                len(unique), len(captures), len(skipped),
+            )
+        return unique, skipped
+
+    # ------------------------------------------------------------------
+    # Image encoding
+    # ------------------------------------------------------------------
 
     def _encode_image(self, path: Path) -> str:
-        """Encode image to base64, resizing large images for faster inference."""
-        max_dim = int(os.getenv("IMAGE_MAX_DIM", "1280"))
+        """Encode image to base64, resizing large images for faster inference.
+
+        Default max dimension is 1920 to preserve fine UI detail (small labels,
+        toolbar icons, grid cells).  Qwen2.5-VL handles up to 2560px natively.
+        """
+        max_dim = int(os.getenv("IMAGE_MAX_DIM", "1920"))
         img = Image.open(path)
 
         # Resize if either dimension exceeds max_dim
@@ -278,7 +410,7 @@ class AnalyzerService:
             "images": [image_b64],
         }
 
-        max_tokens = int(os.getenv("OLLAMA_MAX_TOKENS", "1024"))
+        max_tokens = int(os.getenv("OLLAMA_MAX_TOKENS", "2048"))
         payload = {
             "model": self.model,
             "messages": [
@@ -289,6 +421,7 @@ class AnalyzerService:
                 user_message,
             ],
             "stream": bool(on_thinking),
+            "keep_alive": self.keep_alive,
             "options": {
                 "num_predict": max_tokens,
                 "temperature": 0.1,
@@ -335,6 +468,24 @@ class AnalyzerService:
                         last_callback_time = now
 
             return self._extract_json(full_text)
+
+    async def warm_up(self) -> None:
+        """Pre-load the model into Ollama memory so the first real request is fast."""
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                await client.post(
+                    f"{self.ollama_base_url}/api/chat",
+                    json={
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "stream": False,
+                        "keep_alive": self.keep_alive,
+                        "options": {"num_predict": 1},
+                    },
+                )
+            logger.info("Model '%s' pre-warmed in Ollama", self.model)
+        except Exception:
+            logger.warning("Could not pre-warm model '%s' — first request may be slow", self.model)
 
     async def check_health(self) -> dict:
         """Check if Ollama is reachable, the model is available, and GGUF status."""
