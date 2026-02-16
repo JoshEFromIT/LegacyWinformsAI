@@ -197,8 +197,14 @@ class AnalyzerService:
         image_path: Path,
         capture_id: str,
         previous_analysis: Optional[ScreenAnalysis] = None,
+        on_thinking: Optional[object] = None,
     ) -> ScreenAnalysis:
-        """Analyze a single screenshot using the local Ollama model."""
+        """Analyze a single screenshot using the local Ollama model.
+
+        ``on_thinking`` is an optional async callback:
+            ``async on_thinking(capture_id, partial_text, is_complete)``
+        Called with streamed token chunks as the model generates its response.
+        """
         await self.ensure_gguf_model()
 
         image_b64 = self._encode_image(image_path)
@@ -215,19 +221,23 @@ class AnalyzerService:
 
         user_prompt = f"Analyze this screenshot of a .NET WinForms application.{context_msg}"
 
-        raw = await self._call_ollama(image_b64, user_prompt)
+        raw = await self._call_ollama(image_b64, user_prompt, capture_id=capture_id, on_thinking=on_thinking)
         return self._parse_response(raw, capture_id)
 
     async def analyze_batch(
         self,
         captures: list[tuple[Path, str]],
         on_progress: Optional[object] = None,
+        on_thinking: Optional[object] = None,
     ) -> list[ScreenAnalysis]:
         """Analyze screenshots in parallel for much faster throughput.
 
         Uses a semaphore to limit concurrent Ollama requests (default 4).
-        Calls ``on_progress(completed, total, capture_id, narrative)`` after
-        each screenshot finishes.
+        Calls ``on_progress(completed, total, capture_id, narrative, analysis)``
+        after each screenshot finishes — the full ``ScreenAnalysis`` result is
+        included so callers can build live play-by-play and diagrams.
+        Calls ``on_thinking(capture_id, partial_text, is_complete)`` as the
+        model streams tokens for each screenshot.
         """
         await self.ensure_gguf_model()
 
@@ -240,7 +250,9 @@ class AnalyzerService:
             nonlocal completed_count
             async with sem:
                 try:
-                    result = await self.analyze_screenshot(image_path, capture_id)
+                    result = await self.analyze_screenshot(
+                        image_path, capture_id, on_thinking=on_thinking,
+                    )
                 except Exception:
                     logger.exception("Failed to analyze capture %s", capture_id)
                     result = ScreenAnalysis(
@@ -252,6 +264,7 @@ class AnalyzerService:
                     await on_progress(
                         completed_count, total, capture_id,
                         result.narrative_fragment or "",
+                        result,
                     )
                 return result
 
@@ -278,12 +291,18 @@ class AnalyzerService:
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
-    async def _call_ollama(self, image_b64: str, user_prompt: str) -> dict:
+    async def _call_ollama(
+        self,
+        image_b64: str,
+        user_prompt: str,
+        capture_id: str = "",
+        on_thinking: Optional[object] = None,
+    ) -> dict:
         """Call the local Ollama API with a model request.
 
-        Sends the image for vision-capable models.  For text-only models the
-        image is omitted and the prompt includes a note that image analysis is
-        unavailable.
+        When ``on_thinking`` is provided the Ollama request is streamed so that
+        partial token output can be forwarded in real-time.  Otherwise the
+        request is non-streaming for simplicity.
         """
         url = f"{self.ollama_base_url}/api/chat"
 
@@ -302,7 +321,7 @@ class AnalyzerService:
                 },
                 user_message,
             ],
-            "stream": False,
+            "stream": bool(on_thinking),
             "options": {
                 "num_predict": 4096,
                 "temperature": 0.1,
@@ -311,11 +330,44 @@ class AnalyzerService:
         }
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            text = data["message"]["content"]
-            return self._extract_json(text)
+            if not on_thinking:
+                # Non-streaming path (original behaviour)
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                text = data["message"]["content"]
+                return self._extract_json(text)
+
+            # Streaming path — forward tokens via on_thinking callback
+            full_text = ""
+            last_callback_time = 0.0
+            import time
+
+            async with client.stream("POST", url, json=payload) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        full_text += token
+
+                    # Throttle callbacks to ~every 0.4s to avoid flooding
+                    now = time.monotonic()
+                    is_done = chunk.get("done", False)
+                    if is_done or (now - last_callback_time >= 0.4 and full_text):
+                        try:
+                            await on_thinking(capture_id, full_text, is_done)
+                        except Exception:
+                            pass  # don't let callback errors break analysis
+                        last_callback_time = now
+
+            return self._extract_json(full_text)
 
     async def check_health(self) -> dict:
         """Check if Ollama is reachable, the model is available, and GGUF status."""

@@ -145,12 +145,15 @@ class SessionManager:
         return cap
 
     async def analyze_session(
-        self, session_id: str, on_progress=None
+        self, session_id: str, on_progress=None, on_thinking=None
     ) -> RecordingSession:
         """Run AI analysis on all captured screenshots and generate diagrams.
 
         ``on_progress`` is an optional async callback:
             ``async on_progress(completed, total, capture_id, narrative)``
+        ``on_thinking`` is an optional async callback:
+            ``async on_thinking(capture_id, partial_text, is_complete)``
+        Called with streamed LLM tokens as each screenshot is analyzed.
         """
         session = self._get_session(session_id)
         if not session.captures:
@@ -167,9 +170,9 @@ class SessionManager:
                 if path.exists():
                     capture_pairs.append((path, cap.capture_id))
 
-            # Run AI analysis with progress callback
+            # Run AI analysis with progress + thinking callbacks
             analyses = await self.analyzer.analyze_batch(
-                capture_pairs, on_progress=on_progress
+                capture_pairs, on_progress=on_progress, on_thinking=on_thinking
             )
 
             # Attach analyses back to captures

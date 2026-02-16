@@ -150,19 +150,42 @@
 
         <!-- Loading Overlay with Progress -->
         <div id="loading-overlay" class="loading-overlay" style="display:none;">
-            <div class="progress-panel">
-                <div class="spinner"></div>
-                <p id="loading-text">Analyzing screenshots with AI...</p>
-                <div id="progress-bar-wrap" class="progress-bar-wrap" style="display:none;">
-                    <div class="progress-track">
-                        <div id="progress-bar" class="progress-bar" style="width:0%"></div>
+            <div class="progress-panel-wide">
+                <div class="progress-top">
+                    <div class="spinner"></div>
+                    <p id="loading-text">Analyzing screenshots with AI...</p>
+                    <div id="progress-bar-wrap" class="progress-bar-wrap" style="display:none;">
+                        <div class="progress-track">
+                            <div id="progress-bar" class="progress-bar" style="width:0%"></div>
+                        </div>
+                        <div class="progress-stats">
+                            <span id="progress-fraction">0 / 0</span>
+                            <span id="progress-percent">0%</span>
+                        </div>
                     </div>
-                    <div class="progress-stats">
-                        <span id="progress-fraction">0 / 0</span>
-                        <span id="progress-percent">0%</span>
+                    <p id="progress-narrative" class="progress-narrative"></p>
+                </div>
+
+                <!-- Two-column live view: play-by-play + live diagram -->
+                <div id="live-analysis-area" class="live-analysis-area" style="display:none;">
+                    <div class="live-column live-playbyplay">
+                        <div class="live-column-header">Play-by-Play</div>
+                        <div id="playbyplay-log" class="playbyplay-log"></div>
+                    </div>
+                    <div class="live-column live-diagram">
+                        <div class="live-column-header">Live Diagram</div>
+                        <div id="live-mermaid" class="live-mermaid-container"></div>
                     </div>
                 </div>
-                <p id="progress-narrative" class="progress-narrative"></p>
+
+                <!-- AI Thinking stream (collapsible) -->
+                <div id="thinking-panel" class="thinking-panel" style="display:none;">
+                    <div class="thinking-header">
+                        <span class="thinking-dot"></span>
+                        <span id="thinking-label">AI is thinking...</span>
+                    </div>
+                    <pre id="thinking-text" class="thinking-text"></pre>
+                </div>
             </div>
         </div>
     </main>

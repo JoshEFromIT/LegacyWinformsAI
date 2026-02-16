@@ -156,20 +156,55 @@ async def analyze_session_stream(session_id: str):
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
 
-        async def on_progress(completed, total, capture_id, narrative):
+        async def on_progress(completed, total, capture_id, narrative, analysis=None):
             pct = int((completed / total) * 100) if total else 0
-            await queue.put(("progress", {
+            # Build rich progress payload with play-by-play data
+            payload = {
                 "completed": completed,
                 "total": total,
                 "capture_id": capture_id,
-                "narrative": narrative[:120],
+                "narrative": narrative[:200],
                 "percent": pct,
+            }
+            if analysis:
+                infra_controls = [
+                    c for c in (analysis.controls or []) if c.is_infragistics
+                ]
+                custom_controls = [
+                    c for c in (analysis.controls or []) if c.is_custom
+                ]
+                actions = analysis.actions_since_previous or []
+                payload["detected_form"] = analysis.detected_form or ""
+                payload["window_title"] = analysis.window_title or ""
+                payload["controls_count"] = len(analysis.controls or [])
+                payload["infragistics_count"] = len(infra_controls)
+                payload["custom_count"] = len(custom_controls)
+                payload["actions"] = [
+                    {
+                        "type": a.action_type,
+                        "description": a.description[:100],
+                    }
+                    for a in actions[:5]
+                ]
+            await queue.put(("progress", payload))
+
+        async def on_thinking(capture_id, partial_text, is_complete):
+            """Forward streamed LLM tokens to the client in real time."""
+            # Send a preview of the model's output (last 300 chars to keep
+            # payloads small while still showing recent context).
+            await queue.put(("thinking", {
+                "capture_id": capture_id,
+                "text": partial_text[-300:],
+                "full_length": len(partial_text),
+                "is_complete": is_complete,
             }))
 
         async def run_analysis():
             try:
                 session = await manager.analyze_session(
-                    session_id, on_progress=on_progress
+                    session_id,
+                    on_progress=on_progress,
+                    on_thinking=on_thinking,
                 )
                 # Signal diagram generation phase is done
                 await queue.put(("complete", json.loads(session.model_dump_json())))

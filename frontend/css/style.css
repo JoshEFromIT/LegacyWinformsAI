@@ -555,6 +555,24 @@ input:focus {
     width: 90%;
 }
 
+.progress-panel-wide {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 960px;
+    width: 95%;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.progress-top {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 480px;
+}
+
 .spinner {
     width: 48px;
     height: 48px;
@@ -615,6 +633,164 @@ input:focus {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* --- Live Analysis Area (play-by-play + diagram) --- */
+.live-analysis-area {
+    display: flex;
+    gap: 1rem;
+    width: 100%;
+    margin-top: 1.2rem;
+}
+
+.live-column {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.live-column-header {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    background: rgba(74,158,255,0.05);
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
+}
+
+.playbyplay-log {
+    padding: 0.5rem;
+    max-height: 280px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.playbyplay-entry {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    background: rgba(74,158,255,0.04);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--accent-blue);
+}
+
+.pbp-step {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-blue);
+    color: #fff;
+    border-radius: 50%;
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+.pbp-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.pbp-form {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent-amber);
+    margin-bottom: 0.15rem;
+}
+
+.pbp-narrative {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.pbp-controls {
+    font-size: 0.7rem;
+    color: var(--accent-purple);
+    margin-top: 0.2rem;
+}
+
+.pbp-actions {
+    font-size: 0.7rem;
+    color: var(--accent-green);
+    margin-top: 0.15rem;
+    font-style: italic;
+}
+
+.live-mermaid-container {
+    padding: 0.6rem;
+    max-height: 280px;
+    overflow: auto;
+    background: #fff;
+    border-radius: 0 0 var(--radius) var(--radius);
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.live-mermaid-container svg {
+    max-width: 100%;
+}
+
+@media (max-width: 768px) {
+    .live-analysis-area {
+        flex-direction: column;
+    }
+}
+
+/* --- AI Thinking Panel --- */
+.thinking-panel {
+    width: 100%;
+    margin-top: 1.2rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.8rem;
+    background: rgba(74,158,255,0.08);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.78rem;
+    color: var(--accent-blue);
+    font-weight: 500;
+}
+
+.thinking-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--accent-blue);
+    border-radius: 50%;
+    animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.thinking-text {
+    padding: 0.6rem 0.8rem;
+    margin: 0;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    max-height: 180px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 /* --- Ollama Status Indicator --- */

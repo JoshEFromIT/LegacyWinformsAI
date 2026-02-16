@@ -290,23 +290,40 @@ function hideCaptureStatus() {
     document.getElementById('capture-status').style.display = 'none';
 }
 
+// --- Live analysis state (reset each run) ---
+let liveFlowSteps = [];    // accumulated for live mermaid diagram
+let playByPlayIndex = 0;   // running counter for log entries
+
 document.getElementById('btn-analyze').addEventListener('click', () => {
     showLoading('Connecting to local AI (Ollama)...');
     showProgress(0, 0, 0);
+    resetLiveAnalysis();
+    showThinkingPanel();
 
     const evtSource = new EventSource(
         `${API}/sessions/${activeSessionId}/analyze/stream`
     );
+
+    evtSource.addEventListener('thinking', (e) => {
+        const d = JSON.parse(e.data);
+        updateThinking(d.capture_id, d.text, d.full_length, d.is_complete);
+    });
 
     evtSource.addEventListener('progress', (e) => {
         const d = JSON.parse(e.data);
         updateLoadingText(`Analyzing screenshot ${d.completed} of ${d.total}...`);
         showProgress(d.completed, d.total, d.percent);
         updateProgressNarrative(d.narrative);
+
+        // Build live play-by-play and diagram from rich progress data
+        addPlayByPlayEntry(d);
+        addLiveFlowStep(d);
+        renderLiveDiagram();
     });
 
     evtSource.addEventListener('complete', (e) => {
         evtSource.close();
+        hideThinkingPanel();
         hideLoading();
         const session = JSON.parse(e.data);
         if (session.result) {
@@ -321,12 +338,12 @@ document.getElementById('btn-analyze').addEventListener('click', () => {
         if (e.data) {
             const d = JSON.parse(e.data);
             evtSource.close();
+            hideThinkingPanel();
             hideLoading();
             alert('Analysis failed: ' + (d.message || 'Unknown error'));
         } else {
-            // Connection error — EventSource will auto-reconnect, but we
-            // close it and show an error since our stream is one-shot.
             evtSource.close();
+            hideThinkingPanel();
             hideLoading();
             alert('Lost connection to analysis stream. Check that the server is running.');
         }
@@ -678,6 +695,145 @@ function showProgress(completed, total, percent) {
 
 function updateProgressNarrative(text) {
     document.getElementById('progress-narrative').textContent = text || '';
+}
+
+// --- AI Thinking Panel ---
+
+function showThinkingPanel() {
+    const panel = document.getElementById('thinking-panel');
+    panel.style.display = 'block';
+    document.getElementById('thinking-text').textContent = '';
+    document.getElementById('thinking-label').textContent = 'AI is thinking...';
+}
+
+function hideThinkingPanel() {
+    document.getElementById('thinking-panel').style.display = 'none';
+}
+
+function updateThinking(captureId, text, fullLength, isComplete) {
+    const label = document.getElementById('thinking-label');
+    const textEl = document.getElementById('thinking-text');
+
+    // Show which frame is being processed + token count
+    const tokenHint = fullLength > 300 ? ` (${fullLength} chars)` : '';
+    label.textContent = isComplete
+        ? `Finished analyzing ${captureId}`
+        : `Analyzing ${captureId}...${tokenHint}`;
+
+    // Display the streamed model output (last 300 chars sent from server)
+    textEl.textContent = text || '';
+
+    // Auto-scroll to the bottom of the thinking panel
+    textEl.scrollTop = textEl.scrollHeight;
+}
+
+// --- Live Play-by-Play & Diagram ---
+
+function resetLiveAnalysis() {
+    liveFlowSteps = [];
+    playByPlayIndex = 0;
+    document.getElementById('playbyplay-log').innerHTML = '';
+    document.getElementById('live-mermaid').innerHTML =
+        '<p style="color:#999;font-size:0.82rem;">Diagram will build as frames are analyzed...</p>';
+    document.getElementById('live-analysis-area').style.display = 'flex';
+}
+
+function addPlayByPlayEntry(d) {
+    playByPlayIndex++;
+    const log = document.getElementById('playbyplay-log');
+
+    const formName = d.detected_form || 'Unknown Form';
+    const infraCount = d.infragistics_count || 0;
+    const customCount = d.custom_count || 0;
+    const controlsCount = d.controls_count || 0;
+
+    // Build a human-readable description
+    let desc = d.narrative || 'Analyzing...';
+
+    // Control summary line
+    let controlHint = '';
+    if (controlsCount > 0) {
+        const parts = [];
+        if (infraCount > 0) parts.push(`${infraCount} Infragistics`);
+        if (customCount > 0) parts.push(`${customCount} custom`);
+        const stdCount = controlsCount - infraCount - customCount;
+        if (stdCount > 0) parts.push(`${stdCount} standard`);
+        controlHint = parts.join(', ') + ' controls';
+    }
+
+    // Action summary
+    let actionHint = '';
+    if (d.actions && d.actions.length > 0) {
+        actionHint = d.actions.map(a => a.description).join('; ');
+    }
+
+    const entry = document.createElement('div');
+    entry.className = 'playbyplay-entry';
+    entry.innerHTML = `
+        <div class="pbp-step">${playByPlayIndex}</div>
+        <div class="pbp-content">
+            <div class="pbp-form">${escapeHtml(formName)}</div>
+            <div class="pbp-narrative">${escapeHtml(desc)}</div>
+            ${controlHint ? `<div class="pbp-controls">${escapeHtml(controlHint)}</div>` : ''}
+            ${actionHint ? `<div class="pbp-actions">${escapeHtml(actionHint)}</div>` : ''}
+        </div>
+    `;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+}
+
+function addLiveFlowStep(d) {
+    const formName = d.detected_form || d.window_title || 'Unknown';
+    const narrative = d.narrative || '';
+    // Build a short action label from the first action or the narrative
+    let actionLabel = '';
+    if (d.actions && d.actions.length > 0) {
+        actionLabel = d.actions[0].type || '';
+    }
+    liveFlowSteps.push({ form: formName, action: actionLabel, narrative: narrative });
+}
+
+async function renderLiveDiagram() {
+    if (!mermaidReady || liveFlowSteps.length === 0) return;
+
+    const container = document.getElementById('live-mermaid');
+
+    // Build a simple flowchart from accumulated steps
+    let lines = ['flowchart TD'];
+    const sanitize = (s) => s.replace(/["\[\](){}|<>]/g, ' ').trim() || 'Unknown';
+
+    for (let i = 0; i < liveFlowSteps.length; i++) {
+        const step = liveFlowSteps[i];
+        const nodeId = `S${i}`;
+        const label = sanitize(step.form);
+
+        if (i === 0) {
+            lines.push(`    ${nodeId}["${label}"]`);
+        } else {
+            const prevId = `S${i - 1}`;
+            const edgeLabel = step.action ? sanitize(step.action) : '';
+            if (edgeLabel) {
+                lines.push(`    ${prevId} -->|"${edgeLabel}"| ${nodeId}["${label}"]`);
+            } else {
+                lines.push(`    ${prevId} --> ${nodeId}["${label}"]`);
+            }
+        }
+    }
+
+    // Highlight the latest node
+    const lastId = `S${liveFlowSteps.length - 1}`;
+    lines.push(`    style ${lastId} fill:#4a9eff,stroke:#333,color:#fff`);
+
+    const code = lines.join('\n');
+
+    try {
+        const id = `live-mermaid-${Date.now()}`;
+        const { svg } = await mermaid.render(id, code);
+        container.innerHTML = svg;
+    } catch (err) {
+        // If diagram fails to render, show the raw code
+        container.innerHTML = `<pre style="color:#999;font-size:0.72rem;">${escapeHtml(code)}</pre>`;
+    }
 }
 
 function escapeHtml(str) {
