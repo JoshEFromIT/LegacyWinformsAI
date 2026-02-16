@@ -194,27 +194,47 @@ document.getElementById('btn-stop-rec').addEventListener('click', async () => {
     }
 });
 
-document.getElementById('btn-analyze').addEventListener('click', async () => {
-    showLoading('Analyzing screenshots in parallel with local AI (Ollama)...');
-    try {
-        const resp = await fetch(`${API}/sessions/${activeSessionId}/analyze`, {
-            method: 'POST',
-        });
-        const session = await resp.json();
-        hideLoading();
+document.getElementById('btn-analyze').addEventListener('click', () => {
+    showLoading('Connecting to local AI (Ollama)...');
+    showProgress(0, 0, 0);
 
-        if (session.status === 'complete' && session.result) {
-            showResults(session.result);
-        } else if (session.status === 'error') {
-            alert('Analysis failed: ' + (session.error_message || 'Unknown error'));
-        } else {
-            console.warn('Unexpected session state after analyze:', session);
-            alert('Analysis completed with unexpected status: ' + session.status);
-        }
-    } catch (err) {
+    const evtSource = new EventSource(
+        `${API}/sessions/${activeSessionId}/analyze/stream`
+    );
+
+    evtSource.addEventListener('progress', (e) => {
+        const d = JSON.parse(e.data);
+        updateLoadingText(`Analyzing screenshot ${d.completed} of ${d.total}...`);
+        showProgress(d.completed, d.total, d.percent);
+        updateProgressNarrative(d.narrative);
+    });
+
+    evtSource.addEventListener('complete', (e) => {
+        evtSource.close();
         hideLoading();
-        alert('Analysis request failed: ' + err.message);
-    }
+        const session = JSON.parse(e.data);
+        if (session.result) {
+            showResults(session.result);
+        } else {
+            alert('Analysis completed but produced no result.');
+        }
+    });
+
+    evtSource.addEventListener('error', (e) => {
+        // SSE 'error' event can be a server-sent error or a connection error
+        if (e.data) {
+            const d = JSON.parse(e.data);
+            evtSource.close();
+            hideLoading();
+            alert('Analysis failed: ' + (d.message || 'Unknown error'));
+        } else {
+            // Connection error — EventSource will auto-reconnect, but we
+            // close it and show an error since our stream is one-shot.
+            evtSource.close();
+            hideLoading();
+            alert('Lost connection to analysis stream. Check that the server is running.');
+        }
+    });
 });
 
 document.getElementById('btn-back').addEventListener('click', () => {
@@ -547,10 +567,32 @@ document.querySelectorAll('.tab').forEach(tab => {
 function showLoading(text) {
     loadingText.textContent = text || 'Processing...';
     loadingOverlay.style.display = 'flex';
+    // Reset progress UI
+    document.getElementById('progress-bar-wrap').style.display = 'none';
+    document.getElementById('progress-bar').style.width = '0%';
+    document.getElementById('progress-fraction').textContent = '';
+    document.getElementById('progress-percent').textContent = '';
+    document.getElementById('progress-narrative').textContent = '';
 }
 
 function hideLoading() {
     loadingOverlay.style.display = 'none';
+}
+
+function updateLoadingText(text) {
+    loadingText.textContent = text;
+}
+
+function showProgress(completed, total, percent) {
+    const wrap = document.getElementById('progress-bar-wrap');
+    wrap.style.display = 'block';
+    document.getElementById('progress-bar').style.width = percent + '%';
+    document.getElementById('progress-fraction').textContent = `${completed} / ${total}`;
+    document.getElementById('progress-percent').textContent = percent + '%';
+}
+
+function updateProgressNarrative(text) {
+    document.getElementById('progress-narrative').textContent = text || '';
 }
 
 function escapeHtml(str) {

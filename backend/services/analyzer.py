@@ -221,26 +221,39 @@ class AnalyzerService:
     async def analyze_batch(
         self,
         captures: list[tuple[Path, str]],
+        on_progress: Optional[object] = None,
     ) -> list[ScreenAnalysis]:
         """Analyze screenshots in parallel for much faster throughput.
 
         Uses a semaphore to limit concurrent Ollama requests (default 4).
+        Calls ``on_progress(completed, total, capture_id, narrative)`` after
+        each screenshot finishes.
         """
         await self.ensure_gguf_model()
 
         concurrency = int(os.getenv("OLLAMA_CONCURRENCY", "4"))
         sem = asyncio.Semaphore(concurrency)
+        completed_count = 0
+        total = len(captures)
 
         async def _analyze_one(image_path: Path, capture_id: str) -> ScreenAnalysis:
+            nonlocal completed_count
             async with sem:
                 try:
-                    return await self.analyze_screenshot(image_path, capture_id)
+                    result = await self.analyze_screenshot(image_path, capture_id)
                 except Exception:
                     logger.exception("Failed to analyze capture %s", capture_id)
-                    return ScreenAnalysis(
+                    result = ScreenAnalysis(
                         capture_id=capture_id,
                         narrative_fragment="[Analysis failed for this frame]",
                     )
+                completed_count += 1
+                if on_progress:
+                    await on_progress(
+                        completed_count, total, capture_id,
+                        result.narrative_fragment or "",
+                    )
+                return result
 
         tasks = [
             _analyze_one(image_path, capture_id)

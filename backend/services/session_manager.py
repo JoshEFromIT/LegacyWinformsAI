@@ -144,8 +144,14 @@ class SessionManager:
         self._save_session(session)
         return cap
 
-    async def analyze_session(self, session_id: str) -> RecordingSession:
-        """Run AI analysis on all captured screenshots and generate diagrams."""
+    async def analyze_session(
+        self, session_id: str, on_progress=None
+    ) -> RecordingSession:
+        """Run AI analysis on all captured screenshots and generate diagrams.
+
+        ``on_progress`` is an optional async callback:
+            ``async on_progress(completed, total, capture_id, narrative)``
+        """
         session = self._get_session(session_id)
         if not session.captures:
             raise ValueError("No captures in session to analyze")
@@ -161,8 +167,10 @@ class SessionManager:
                 if path.exists():
                     capture_pairs.append((path, cap.capture_id))
 
-            # Run AI analysis
-            analyses = await self.analyzer.analyze_batch(capture_pairs)
+            # Run AI analysis with progress callback
+            analyses = await self.analyzer.analyze_batch(
+                capture_pairs, on_progress=on_progress
+            )
 
             # Attach analyses back to captures
             analysis_map = {a.capture_id: a for a in analyses}

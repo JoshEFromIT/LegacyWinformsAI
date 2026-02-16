@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.models.schemas import RDPConnectionConfig, RecordingSession, ScreenCapture
@@ -132,6 +135,73 @@ async def analyze_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/sessions/{session_id}/analyze/stream")
+async def analyze_session_stream(session_id: str):
+    """Run AI analysis with Server-Sent Events progress streaming.
+
+    Sends events:
+      - ``progress``  — ``{completed, total, capture_id, narrative, percent}``
+      - ``diagrams``  — generating diagrams phase
+      - ``complete``  — final session JSON
+      - ``error``     — error message
+    """
+    try:
+        manager = get_manager()
+        manager._get_session(session_id)  # validate exists
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    async def event_stream():
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def on_progress(completed, total, capture_id, narrative):
+            pct = int((completed / total) * 100) if total else 0
+            await queue.put(("progress", {
+                "completed": completed,
+                "total": total,
+                "capture_id": capture_id,
+                "narrative": narrative[:120],
+                "percent": pct,
+            }))
+
+        async def run_analysis():
+            try:
+                session = await manager.analyze_session(
+                    session_id, on_progress=on_progress
+                )
+                # Signal diagram generation phase is done
+                await queue.put(("complete", json.loads(session.model_dump_json())))
+            except Exception as e:
+                await queue.put(("error", {"message": str(e)}))
+
+        task = asyncio.create_task(run_analysis())
+
+        while True:
+            try:
+                event_type, data = await asyncio.wait_for(queue.get(), timeout=0.5)
+                yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+                if event_type in ("complete", "error"):
+                    break
+            except asyncio.TimeoutError:
+                # Send keepalive comment to prevent connection timeout
+                yield ": keepalive\n\n"
+                if task.done():
+                    # Task finished but nothing in queue — shouldn't happen normally
+                    break
+
+        await task  # ensure cleanup
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # --- Results ---
