@@ -23,50 +23,15 @@ from backend.models.schemas import ScreenAnalysis, UIControl, UserAction
 logger = logging.getLogger(__name__)
 
 ANALYSIS_SYSTEM_PROMPT = """\
-You are an expert analyst for legacy .NET WinForms desktop applications that use Infragistics \
-controls (UltraGrid, UltraTextEditor, UltraComboEditor, UltraToolbarsManager, UltraDockManager, etc.) \
-and custom-built controls.
+You are analyzing screenshots of a legacy .NET WinForms application. Extract:
+- window_title: window title bar text
+- detected_form: logical form/screen name (e.g., "Customer Search")
+- controls: array of visible UI controls with control_type, label, state, is_infragistics, is_custom
+- actions_since_previous: array of user actions (type, description, target_control) compared to previous state
+- narrative_fragment: 1-2 sentence description of what user is doing
+- raw_description: detailed description of everything visible
 
-You will receive screenshots from an RDP session showing a WinForms application. \
-Your job is to analyze each screenshot and identify:
-
-1. **Window/Form Title**: The title bar text of the active window.
-2. **Form Name**: Infer the logical form or screen name (e.g., "Customer Search", "Order Entry").
-3. **UI Controls**: List all visible controls with:
-   - control_type: Specific Infragistics control name if recognizable, otherwise standard WinForms type
-   - label: Any visible label/text associated with the control
-   - state: Current state (focused, disabled, populated, empty, expanded, collapsed, etc.)
-   - is_infragistics: true if it appears to be an Infragistics component
-   - is_custom: true if it appears to be a non-standard custom control
-4. **User Actions**: If a previous screenshot description is provided, describe what the user did \
-between the previous state and the current state.
-5. **Narrative**: A concise sentence describing what the user is doing in this screenshot.
-6. **Raw Description**: A detailed description of everything visible on screen.
-
-Respond ONLY with valid JSON matching this structure:
-{
-  "window_title": "string",
-  "detected_form": "string",
-  "controls": [
-    {
-      "control_type": "string",
-      "label": "string",
-      "state": "string",
-      "is_infragistics": bool,
-      "is_custom": bool
-    }
-  ],
-  "actions_since_previous": [
-    {
-      "action_type": "string",
-      "description": "string",
-      "confidence": float,
-      "target_control": {"control_type": "string", "label": "string"} | null
-    }
-  ],
-  "narrative_fragment": "string",
-  "raw_description": "string"
-}
+Output ONLY valid JSON (no markdown, no explanation).
 """
 
 # Default directory where users drop .gguf files
@@ -118,10 +83,11 @@ class AnalyzerService:
         if projector:
             modelfile_lines.append(f"ADAPTER {projector}")
 
+        max_tokens = int(os.getenv("OLLAMA_MAX_TOKENS", "1024"))
         modelfile_lines.extend([
             f'SYSTEM """{ANALYSIS_SYSTEM_PROMPT}"""',
             "PARAMETER temperature 0.1",
-            "PARAMETER num_predict 4096",
+            f"PARAMETER num_predict {max_tokens}",
         ])
 
         modelfile_content = "\n".join(modelfile_lines)
@@ -312,6 +278,7 @@ class AnalyzerService:
             "images": [image_b64],
         }
 
+        max_tokens = int(os.getenv("OLLAMA_MAX_TOKENS", "1024"))
         payload = {
             "model": self.model,
             "messages": [
@@ -323,7 +290,7 @@ class AnalyzerService:
             ],
             "stream": bool(on_thinking),
             "options": {
-                "num_predict": 4096,
+                "num_predict": max_tokens,
                 "temperature": 0.1,
             },
             "format": "json",
