@@ -2,7 +2,7 @@
  * RDP Recorder — Frontend Application
  *
  * Manages session lifecycle, screenshot upload, and results display
- * with Mermaid diagram rendering.
+ * with Mermaid diagram rendering and Excalidraw MCP canvas integration.
  *
  * Uses local Ollama LLM for AI vision analysis (no cloud APIs required).
  */
@@ -12,6 +12,7 @@ const API = '/api';
 // --- State ---
 let activeSessionId = null;
 let pollInterval = null;
+let currentExcalidrawScenes = {};
 
 // --- DOM References ---
 const sessionPanel = document.getElementById('session-panel');
@@ -309,6 +310,14 @@ async function showResults(result) {
     await renderMermaidDiagram('mermaid-flowchart', result.mermaid_flowchart);
     await renderMermaidDiagram('mermaid-sequence', result.mermaid_sequence);
     await renderMermaidDiagram('mermaid-state', result.mermaid_state);
+
+    // Store Excalidraw scenes for the Excalidraw tab
+    currentExcalidrawScenes = {
+        flowchart: result.excalidraw_flowchart || null,
+        sequence: result.excalidraw_sequence || null,
+        state: result.excalidraw_state || null,
+    };
+    renderExcalidrawPreview();
 }
 
 async function renderMermaidDiagram(containerId, code) {
@@ -384,6 +393,133 @@ function copyToClipboard(elementId) {
 }
 
 // ============================================
+// Excalidraw Integration
+// ============================================
+
+function renderExcalidrawPreview() {
+    const preview = document.getElementById('excalidraw-preview');
+    const select = document.getElementById('excalidraw-diagram-select');
+    const diagramType = select.value;
+    const scene = currentExcalidrawScenes[diagramType];
+
+    if (!scene || !scene.elements || scene.elements.length === 0) {
+        preview.innerHTML = `
+            <div class="excalidraw-empty">
+                <p>No Excalidraw diagram available for this type.</p>
+                <p style="font-size:0.8rem;color:var(--text-muted);">
+                    Ensure the Excalidraw MCP canvas server is running during analysis.
+                </p>
+            </div>`;
+        return;
+    }
+
+    const elementCount = scene.elements.length;
+    const types = {};
+    scene.elements.forEach(el => {
+        types[el.type] = (types[el.type] || 0) + 1;
+    });
+    const typesSummary = Object.entries(types)
+        .map(([t, c]) => `${c} ${t}${c > 1 ? 's' : ''}`)
+        .join(', ');
+
+    preview.innerHTML = `
+        <div class="excalidraw-scene-info">
+            <div class="excalidraw-scene-header">
+                <span class="badge badge-complete">Scene Ready</span>
+                <span style="font-size:0.82rem;color:var(--text-secondary);">${elementCount} elements (${typesSummary})</span>
+            </div>
+            <div class="excalidraw-canvas-frame">
+                <iframe id="excalidraw-iframe"
+                    src="${getExcalidrawCanvasUrl()}"
+                    style="width:100%;height:500px;border:none;border-radius:var(--radius);"
+                    title="Excalidraw Canvas">
+                </iframe>
+            </div>
+            <div class="excalidraw-actions" style="margin-top:0.8rem;">
+                <button class="btn btn-primary btn-sm" onclick="loadSceneToCanvas()">Load Diagram to Canvas</button>
+                <button class="btn btn-secondary btn-sm" onclick="downloadExcalidrawJson()">Download .excalidraw</button>
+            </div>
+        </div>`;
+}
+
+function getExcalidrawCanvasUrl() {
+    // When running in Docker, the canvas is on port 3000
+    // From the browser, we connect to the host-exposed port
+    const loc = window.location;
+    return `${loc.protocol}//${loc.hostname}:3000`;
+}
+
+async function loadSceneToCanvas() {
+    const select = document.getElementById('excalidraw-diagram-select');
+    const diagramType = select.value;
+    const scene = currentExcalidrawScenes[diagramType];
+
+    if (!scene || !scene.elements) {
+        alert('No Excalidraw scene data available for this diagram type.');
+        return;
+    }
+
+    try {
+        const canvasUrl = getExcalidrawCanvasUrl();
+
+        // Clear existing elements on the canvas
+        await fetch(`${canvasUrl}/api/elements/clear`, { method: 'DELETE' });
+
+        // Batch-create the elements
+        const resp = await fetch(`${canvasUrl}/api/elements/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ elements: scene.elements }),
+        });
+
+        if (resp.ok) {
+            // Scroll to content
+            await fetch(`${canvasUrl}/api/viewport`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scrollToContent: true }),
+            });
+
+            // Reload the iframe
+            const iframe = document.getElementById('excalidraw-iframe');
+            if (iframe) iframe.src = iframe.src;
+        } else {
+            alert('Failed to load scene to canvas.');
+        }
+    } catch (err) {
+        alert('Could not connect to Excalidraw canvas: ' + err.message);
+    }
+}
+
+function openExcalidrawCanvas() {
+    window.open(getExcalidrawCanvasUrl(), '_blank');
+}
+
+function downloadExcalidrawJson() {
+    const select = document.getElementById('excalidraw-diagram-select');
+    const diagramType = select.value;
+    const scene = currentExcalidrawScenes[diagramType];
+
+    if (!scene) {
+        alert('No Excalidraw scene data available for this diagram type.');
+        return;
+    }
+
+    const blob = new Blob([JSON.stringify(scene, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${diagramType}-diagram.excalidraw`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// Update Excalidraw preview when diagram type changes
+document.getElementById('excalidraw-diagram-select')?.addEventListener('change', renderExcalidrawPreview);
+
+// ============================================
 // Ollama Status Check
 // ============================================
 
@@ -446,8 +582,33 @@ async function registerGgufModel() {
     }
 }
 
+// ============================================
+// Excalidraw Status Check
+// ============================================
+
+async function checkExcalidrawStatus() {
+    const statusEl = document.getElementById('excalidraw-status');
+    try {
+        const resp = await fetch(`${API}/health/excalidraw`);
+        const health = await resp.json();
+
+        if (health.excalidraw_reachable) {
+            statusEl.innerHTML = `<span class="ollama-connected">Excalidraw MCP canvas connected</span>`;
+            statusEl.className = 'ollama-status connected';
+        } else {
+            statusEl.innerHTML = `<span class="ollama-disconnected">Excalidraw canvas not reachable at ${escapeHtml(health.excalidraw_url)}</span>`;
+            statusEl.className = 'ollama-status disconnected';
+        }
+    } catch (err) {
+        statusEl.innerHTML = '<span class="ollama-disconnected">Cannot check Excalidraw status</span>';
+        statusEl.className = 'ollama-status disconnected';
+    }
+}
+
 // --- Initial Load ---
 loadSessions();
 checkOllamaStatus();
-// Re-check Ollama status periodically
+checkExcalidrawStatus();
+// Re-check status periodically
 setInterval(checkOllamaStatus, 30000);
+setInterval(checkExcalidrawStatus, 30000);

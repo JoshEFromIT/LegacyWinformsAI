@@ -9,6 +9,8 @@ services:
       # When running in Docker, reach Ollama on the host via host.docker.internal
       # Override in .env if Ollama runs in a different location
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # Excalidraw MCP canvas server URL (Docker service name resolves internally)
+      - EXCALIDRAW_CANVAS_URL=${EXCALIDRAW_CANVAS_URL:-http://excalidraw-canvas:3000}
     volumes:
       - ./sessions:/app/sessions
       - ./models:/app/models
@@ -17,6 +19,8 @@ services:
     restart: unless-stopped
     depends_on:
       ollama:
+        condition: service_started
+      excalidraw-canvas:
         condition: service_started
 
   ollama:
@@ -35,6 +39,15 @@ services:
     #         - driver: nvidia
     #           count: all
     #           capabilities: [gpu]
+
+  excalidraw-canvas:
+    image: ghcr.io/yctimlin/mcp_excalidraw-canvas:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3000
+    restart: unless-stopped
 
 volumes:
   ollama_data:

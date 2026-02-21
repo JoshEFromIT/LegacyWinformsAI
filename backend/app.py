@@ -20,10 +20,11 @@ app = FastAPI(
     description=(
         "Records screen interactions from RDP sessions viewing .NET WinForms "
         "applications with Infragistics controls, then uses a local AI vision model "
-        "via Ollama (llama3.2-vision) to generate Mermaid diagrams and narrative "
+        "via Ollama (llama3.2-vision) to generate Mermaid diagrams, Excalidraw "
+        "hand-drawn diagrams (via the Excalidraw MCP canvas server), and narrative "
         "documentation. No cloud API keys required."
     ),
-    version="2.0.0",
+    version="3.0.0",
 )
 
 app.add_middleware(

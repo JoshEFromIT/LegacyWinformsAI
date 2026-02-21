@@ -5,15 +5,25 @@ Converts a sequence of ScreenAnalysis results into:
 2. Sequence diagram — shows user<->application interaction over time
 3. State diagram — shows form/screen state transitions
 4. Narrative — a readable story of what the user did
+5. Excalidraw scenes — hand-drawn style diagrams via the Excalidraw MCP canvas server
 """
 
 from __future__ import annotations
 
+import logging
+from typing import Optional
+
 from backend.models.schemas import FlowStep, ScreenAnalysis, SessionResult
+from backend.services.excalidraw_service import ExcalidrawService
+
+logger = logging.getLogger(__name__)
 
 
 class DiagramGenerator:
     """Generates Mermaid diagrams and narrative text from analysis results."""
+
+    def __init__(self, excalidraw: Optional[ExcalidrawService] = None) -> None:
+        self.excalidraw = excalidraw or ExcalidrawService()
 
     def generate(
         self,
@@ -37,6 +47,33 @@ class DiagramGenerator:
             flow_steps=flow_steps,
             total_captures=len(analyses),
         )
+
+    async def generate_with_excalidraw(
+        self,
+        session_id: str,
+        analyses: list[ScreenAnalysis],
+        title: str = "",
+    ) -> SessionResult:
+        """Generate Mermaid diagrams and convert them to Excalidraw scenes."""
+        result = self.generate(session_id, analyses, title)
+
+        try:
+            excalidraw_scenes = await self.excalidraw.convert_mermaid_to_excalidraw(
+                mermaid_flowchart=result.mermaid_flowchart,
+                mermaid_sequence=result.mermaid_sequence,
+                mermaid_state=result.mermaid_state,
+                session_id=session_id,
+            )
+            result.excalidraw_flowchart = excalidraw_scenes.get("flowchart")
+            result.excalidraw_sequence = excalidraw_scenes.get("sequence")
+            result.excalidraw_state = excalidraw_scenes.get("state")
+        except Exception:
+            logger.exception(
+                "Excalidraw conversion failed for session %s — Mermaid diagrams are still available",
+                session_id,
+            )
+
+        return result
 
     def _build_flow_steps(self, analyses: list[ScreenAnalysis]) -> list[FlowStep]:
         """Collapse consecutive frames on the same form into flow steps."""

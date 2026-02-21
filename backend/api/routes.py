@@ -5,11 +5,13 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+import httpx
 from pydantic import BaseModel
 
 from backend.models.schemas import RDPConnectionConfig, RecordingSession, ScreenCapture
 from backend.services.session_manager import SessionManager
 from backend.services.analyzer import AnalyzerService
+from backend.services.excalidraw_service import ExcalidrawService
 
 router = APIRouter(prefix="/api")
 
@@ -207,3 +209,72 @@ async def register_gguf_model():
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to register GGUF model: {e}")
+
+
+# --- Excalidraw MCP Canvas ---
+
+@router.get("/health/excalidraw")
+async def excalidraw_health():
+    """Check Excalidraw MCP canvas server connectivity."""
+    service = ExcalidrawService()
+    return await service.check_health()
+
+
+@router.get("/sessions/{session_id}/excalidraw/{diagram_type}")
+async def get_excalidraw_scene(session_id: str, diagram_type: str):
+    """Get the Excalidraw JSON scene for a specific diagram type.
+
+    ``diagram_type`` must be one of: ``flowchart``, ``sequence``, ``state``.
+    """
+    if diagram_type not in ("flowchart", "sequence", "state"):
+        raise HTTPException(
+            status_code=400,
+            detail="diagram_type must be one of: flowchart, sequence, state",
+        )
+
+    try:
+        session = get_manager().get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if not session.result:
+        raise HTTPException(
+            status_code=404,
+            detail="No analysis results yet. Run /analyze first.",
+        )
+
+    scene = getattr(session.result, f"excalidraw_{diagram_type}", None)
+    if not scene:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No Excalidraw scene available for {diagram_type}. "
+                   "The canvas server may not have been reachable during analysis.",
+        )
+
+    return scene
+
+
+class MermaidConvertRequest(BaseModel):
+    mermaid_source: str
+
+
+@router.post("/excalidraw/convert-mermaid")
+async def convert_mermaid_to_excalidraw(req: MermaidConvertRequest):
+    """Ad-hoc conversion of Mermaid syntax to an Excalidraw scene.
+
+    Clears the canvas, sends the Mermaid source, and returns the
+    resulting Excalidraw JSON scene.
+    """
+    service = ExcalidrawService()
+    try:
+        await service.clear_canvas()
+        await service.create_from_mermaid(req.mermaid_source)
+        scene = await service.export_scene()
+        return scene
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=502,
+            detail="Cannot connect to Excalidraw canvas server. Is it running?",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mermaid conversion failed: {e}")

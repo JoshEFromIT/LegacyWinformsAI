@@ -18,6 +18,7 @@ from backend.models.schemas import (
 from backend.services.analyzer import AnalyzerService
 from backend.services.capture import CaptureService
 from backend.services.diagram_generator import DiagramGenerator
+from backend.services.excalidraw_service import ExcalidrawService
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ class SessionManager:
         self.sessions: dict[str, RecordingSession] = {}
         self.capture_service = CaptureService()
         self.analyzer = AnalyzerService()
-        self.diagram_gen = DiagramGenerator()
+        self.excalidraw = ExcalidrawService()
+        self.diagram_gen = DiagramGenerator(excalidraw=self.excalidraw)
         self._load_existing_sessions()
 
     def _load_existing_sessions(self) -> None:
@@ -179,7 +181,10 @@ class SessionManager:
             if session.started_at and session.stopped_at:
                 duration = (session.stopped_at - session.started_at).total_seconds()
 
-            result = self.diagram_gen.generate(session_id, analyses, title)
+            # Generate Mermaid diagrams and convert to Excalidraw scenes
+            result = await self.diagram_gen.generate_with_excalidraw(
+                session_id, analyses, title
+            )
             result.duration_seconds = duration
             session.result = result
             session.status = SessionStatus.COMPLETE

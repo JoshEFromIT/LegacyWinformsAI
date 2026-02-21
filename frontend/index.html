@@ -13,6 +13,7 @@
             <h1>RDP Session Recorder</h1>
             <p class="subtitle">.NET WinForms &amp; Infragistics Interaction Analyzer</p>
             <div id="ollama-status" class="ollama-status"></div>
+            <div id="excalidraw-status" class="ollama-status"></div>
         </div>
     </header>
 
@@ -90,6 +91,7 @@
                 <button class="tab active" data-tab="flowchart">Flowchart</button>
                 <button class="tab" data-tab="sequence">Sequence Diagram</button>
                 <button class="tab" data-tab="state">State Diagram</button>
+                <button class="tab" data-tab="excalidraw">Excalidraw</button>
                 <button class="tab" data-tab="narrative">Narrative</button>
                 <button class="tab" data-tab="raw">Raw Mermaid</button>
             </div>
@@ -103,6 +105,22 @@
                 </div>
                 <div id="tab-state" class="tab-pane">
                     <div id="mermaid-state" class="mermaid-container"></div>
+                </div>
+                <div id="tab-excalidraw" class="tab-pane">
+                    <div class="excalidraw-panel">
+                        <div class="excalidraw-toolbar">
+                            <select id="excalidraw-diagram-select">
+                                <option value="flowchart">Flowchart</option>
+                                <option value="sequence">Sequence Diagram</option>
+                                <option value="state">State Diagram</option>
+                            </select>
+                            <button class="btn btn-secondary btn-sm" onclick="openExcalidrawCanvas()">Open in Canvas</button>
+                            <button class="btn btn-secondary btn-sm" onclick="downloadExcalidrawJson()">Download .excalidraw</button>
+                        </div>
+                        <div id="excalidraw-preview" class="excalidraw-preview">
+                            <p style="color:var(--text-muted);font-size:0.85rem;">No Excalidraw diagrams available. Run analysis with the canvas server running.</p>
+                        </div>
+                    </div>
                 </div>
                 <div id="tab-narrative" class="tab-pane">
                     <div id="narrative-content" class="narrative"></div>
@@ -133,7 +151,7 @@
     </main>
 
     <footer>
-        <p>RDP Recorder &mdash; Local AI-powered documentation for legacy .NET WinForms applications (Ollama + llama3.2-vision)</p>
+        <p>RDP Recorder &mdash; Local AI-powered documentation for legacy .NET WinForms applications (Ollama + llama3.2-vision + Excalidraw MCP)</p>
     </footer>
 
     <script src="js/app.js"></script>
