@@ -313,6 +313,7 @@ async function showResults(result) {
 
     // Store Excalidraw scenes for the Excalidraw tab
     currentExcalidrawScenes = {
+        ai_designed: result.excalidraw_ai_designed || null,
         flowchart: result.excalidraw_flowchart || null,
         sequence: result.excalidraw_sequence || null,
         state: result.excalidraw_state || null,
@@ -402,13 +403,16 @@ function renderExcalidrawPreview() {
     const diagramType = select.value;
     const scene = currentExcalidrawScenes[diagramType];
 
+    const isAiDesigned = diagramType === 'ai_designed';
+
     if (!scene || !scene.elements || scene.elements.length === 0) {
+        const hint = isAiDesigned
+            ? 'The AI will design this diagram during analysis using the Ollama model.'
+            : 'Ensure the Excalidraw MCP canvas server is running during analysis.';
         preview.innerHTML = `
             <div class="excalidraw-empty">
                 <p>No Excalidraw diagram available for this type.</p>
-                <p style="font-size:0.8rem;color:var(--text-muted);">
-                    Ensure the Excalidraw MCP canvas server is running during analysis.
-                </p>
+                <p style="font-size:0.8rem;color:var(--text-muted);">${hint}</p>
             </div>`;
         return;
     }
@@ -422,11 +426,18 @@ function renderExcalidrawPreview() {
         .map(([t, c]) => `${c} ${t}${c > 1 ? 's' : ''}`)
         .join(', ');
 
+    const badgeLabel = isAiDesigned ? 'AI Designed' : 'Scene Ready';
+    const badgeClass = isAiDesigned ? 'badge-analyzing' : 'badge-complete';
+    const sourceNote = isAiDesigned
+        ? '<span style="font-size:0.75rem;color:var(--accent-amber);">Designed directly by the AI — richer layout than Mermaid conversion</span>'
+        : '';
+
     preview.innerHTML = `
         <div class="excalidraw-scene-info">
             <div class="excalidraw-scene-header">
-                <span class="badge badge-complete">Scene Ready</span>
+                <span class="badge ${badgeClass}">${badgeLabel}</span>
                 <span style="font-size:0.82rem;color:var(--text-secondary);">${elementCount} elements (${typesSummary})</span>
+                ${sourceNote}
             </div>
             <div class="excalidraw-canvas-frame">
                 <iframe id="excalidraw-iframe"

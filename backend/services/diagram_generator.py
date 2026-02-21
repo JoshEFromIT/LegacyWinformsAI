@@ -14,6 +14,7 @@ import logging
 from typing import Optional
 
 from backend.models.schemas import FlowStep, ScreenAnalysis, SessionResult
+from backend.services.excalidraw_designer import ExcalidrawDesigner
 from backend.services.excalidraw_service import ExcalidrawService
 
 logger = logging.getLogger(__name__)
@@ -22,8 +23,13 @@ logger = logging.getLogger(__name__)
 class DiagramGenerator:
     """Generates Mermaid diagrams and narrative text from analysis results."""
 
-    def __init__(self, excalidraw: Optional[ExcalidrawService] = None) -> None:
+    def __init__(
+        self,
+        excalidraw: Optional[ExcalidrawService] = None,
+        designer: Optional[ExcalidrawDesigner] = None,
+    ) -> None:
         self.excalidraw = excalidraw or ExcalidrawService()
+        self.designer = designer or ExcalidrawDesigner()
 
     def generate(
         self,
@@ -57,6 +63,7 @@ class DiagramGenerator:
         """Generate Mermaid diagrams and convert them to Excalidraw scenes."""
         result = self.generate(session_id, analyses, title)
 
+        # 1. Convert Mermaid diagrams → Excalidraw via the canvas server
         try:
             excalidraw_scenes = await self.excalidraw.convert_mermaid_to_excalidraw(
                 mermaid_flowchart=result.mermaid_flowchart,
@@ -69,7 +76,18 @@ class DiagramGenerator:
             result.excalidraw_state = excalidraw_scenes.get("state")
         except Exception:
             logger.exception(
-                "Excalidraw conversion failed for session %s — Mermaid diagrams are still available",
+                "Excalidraw Mermaid conversion failed for session %s",
+                session_id,
+            )
+
+        # 2. Ask the AI to design a richer diagram directly
+        try:
+            ai_scene = await self.designer.design_diagram(analyses)
+            if ai_scene:
+                result.excalidraw_ai_designed = ai_scene
+        except Exception:
+            logger.exception(
+                "AI Excalidraw design failed for session %s — other diagrams are still available",
                 session_id,
             )
 

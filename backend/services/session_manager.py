@@ -18,6 +18,7 @@ from backend.models.schemas import (
 from backend.services.analyzer import AnalyzerService
 from backend.services.capture import CaptureService
 from backend.services.diagram_generator import DiagramGenerator
+from backend.services.excalidraw_designer import ExcalidrawDesigner
 from backend.services.excalidraw_service import ExcalidrawService
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,11 @@ class SessionManager:
         self.capture_service = CaptureService()
         self.analyzer = AnalyzerService()
         self.excalidraw = ExcalidrawService()
-        self.diagram_gen = DiagramGenerator(excalidraw=self.excalidraw)
+        self.excalidraw_designer = ExcalidrawDesigner()
+        self.diagram_gen = DiagramGenerator(
+            excalidraw=self.excalidraw,
+            designer=self.excalidraw_designer,
+        )
         self._load_existing_sessions()
 
     def _load_existing_sessions(self) -> None:

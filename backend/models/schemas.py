@@ -101,6 +101,10 @@ class SessionResult(BaseModel):
     excalidraw_state: Optional[dict] = Field(
         default=None, description="Excalidraw JSON scene for the state diagram"
     )
+    excalidraw_ai_designed: Optional[dict] = Field(
+        default=None,
+        description="Excalidraw JSON scene designed directly by the AI (richer than Mermaid conversion)",
+    )
     flow_steps: list[FlowStep] = []
     total_captures: int = 0
     duration_seconds: float = 0.0
